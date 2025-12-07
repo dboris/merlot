@@ -1,0 +1,69 @@
+module 'Merlot.Test_printf' ['test_sprintf_string'/1,
+                       'test_sprintf_int'/1,
+                       'test_sprintf_mixed'/1,
+                       'test_sprintf_float'/1,
+                       'main'/1]
+    attributes []
+
+'test_sprintf_string'/1 =
+    fun (_) ->
+      call 'lists':'flatten' (call 'io_lib':'format' (#{#<72>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<126>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']])}#, [#{#<119>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<100>(8,1,'integer',['unsigned'|['big']])}#]))
+'test_sprintf_int'/1 =
+    fun (_) ->
+      call 'lists':'flatten' (call 'io_lib':'format' (#{#<86>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<117>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<58>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<126>(8,1,'integer',['unsigned'|['big']]),
+#<66>(8,1,'integer',['unsigned'|['big']])}#, [42]))
+'test_sprintf_mixed'/1 =
+    fun (_) ->
+      call 'lists':'flatten' (call 'io_lib':'format' (#{#<78>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<109>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<58>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<126>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<44>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<65>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<58>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<126>(8,1,'integer',['unsigned'|['big']]),
+#<66>(8,1,'integer',['unsigned'|['big']])}#, [#{#<65>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<105>(8,1,'integer',['unsigned'|['big']]),
+#<99>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']])}#, 30]))
+'test_sprintf_float'/1 =
+    fun (_) ->
+      call 'lists':'flatten' (call 'io_lib':'format' (#{#<80>(8,1,'integer',['unsigned'|['big']]),
+#<105>(8,1,'integer',['unsigned'|['big']]),
+#<58>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<126>(8,1,'integer',['unsigned'|['big']]),
+#<46>(8,1,'integer',['unsigned'|['big']]),
+#<50>(8,1,'integer',['unsigned'|['big']]),
+#<102>(8,1,'integer',['unsigned'|['big']])}#, [3.141590]))
+'main'/1 =
+    fun (_) ->
+      let <S1> = apply 'test_sprintf_string'/1 ('ok') in let <S2> = apply 'test_sprintf_int'/1 ('ok') in let <S3> = apply 'test_sprintf_mixed'/1 ('ok') in let <S4> = apply 'test_sprintf_float'/1 ('ok') in {S1, S2, S3, S4}
+end

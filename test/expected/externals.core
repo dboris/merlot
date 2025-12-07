@@ -1,0 +1,27 @@
+module 'Merlot.Externals' ['my_pid'/1,
+                       'reverse_list'/1,
+                       'list_length'/1,
+                       'first'/1,
+                       'rest'/1,
+                       'example'/1]
+    attributes []
+
+'my_pid'/1 =
+    fun (_) ->
+      call 'erlang':'self' ()
+'reverse_list'/1 =
+    fun (Xs) ->
+      call 'lists':'reverse' (Xs)
+'list_length'/1 =
+    fun (Xs) ->
+      call 'erlang':'length' (Xs)
+'first'/1 =
+    fun (Xs) ->
+      call 'erlang':'hd' (Xs)
+'rest'/1 =
+    fun (Xs) ->
+      call 'erlang':'tl' (Xs)
+'example'/1 =
+    fun (_) ->
+      let <Xs> = [1|[2|[3|[]]]] in let <Rev> = call 'lists':'reverse' (Xs) in let <Len> = call 'erlang':'length' (Rev) in Len
+end

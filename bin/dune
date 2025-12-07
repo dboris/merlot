@@ -1,0 +1,4 @@
+(executable
+ (public_name merlot)
+ (name main)
+ (libraries merlot cmdliner compiler-libs.common))

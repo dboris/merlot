@@ -1,0 +1,9 @@
+(library
+ (name merlot_stdlib)
+ (public_name merlot.stdlib)
+ (modules process erlang lists timer io result actor supervisor
+          list option string enum map keyword merlot_stdlib)
+ ; Only bytecode - this library is for compiling to BEAM, not running natively
+ (modes byte)
+ ; Allow partial match warnings for selective receive patterns
+ (flags (:standard -w -8)))

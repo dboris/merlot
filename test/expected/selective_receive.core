@@ -1,0 +1,73 @@
+module 'Merlot.Selective_receive' ['priority_loop'/1,
+                       'call'/2,
+                       'server_loop'/1,
+                       'start_server'/1,
+                       'receive_from'/1,
+                       'flush_type'/1,
+                       'worker'/1,
+                       'collect_until_done'/1,
+                       'selective_demo'/1]
+    attributes []
+
+'priority_loop'/1 =
+    fun (_) ->
+      receive 
+  <{'High', Msg}> when 'true' -> let <V_2> = Msg in apply 'priority_loop'/1 ('ok')
+  <{'Low', _}> when 'true' -> apply 'priority_loop'/1 ('ok') after 0 -> 'timeout'
+'call'/2 =
+    fun (Server, Request) ->
+      let <Ref> = call 'erlang':'make_ref' () in let <Me> = call 'erlang':'self' () in let <V_3> = call 'erlang':'!' (Server, {'Call', {Ref, Me, Request}}) in receive 
+  <{'Reply', {R, Response}}> when call 'erlang':'=:=' (R, Ref) -> Response after 'infinity' -> 'ok'
+'server_loop'/1 =
+    fun (State) ->
+      receive 
+  <{'Call', {Ref, From, 'Get'}}> when 'true' -> let <V_7> = call 'erlang':'!' (From, {'Reply', {Ref, State}}) in apply 'server_loop'/1 (State)
+  <{'Call', {Ref, From, {'Set', New_state}}}> when 'true' -> let <V_8> = call 'erlang':'!' (From, {'Reply', {Ref, 'Ok'}}) in apply 'server_loop'/1 (New_state)
+  <{'Call', {Ref, From, 'Inc'}}> when 'true' -> let <V_9> = call 'erlang':'!' (From, {'Reply', {Ref, call 'erlang':'+' (State, 1)}}) in apply 'server_loop'/1 (call 'erlang':'+' (State, 1))
+  <'Stop'> when 'true' -> State after 'infinity' -> 'ok'
+'start_server'/1 =
+    fun (Initial) ->
+      call 'erlang':'spawn' (fun () -> apply 'server_loop'/1 (Initial))
+'receive_from'/1 =
+    fun (Sender) ->
+      receive 
+  <{'Msg', {From, Content}}> when call 'erlang':'=:=' (From, Sender) -> Content after 'infinity' -> 'ok'
+'flush_type'/1 =
+    fun (_) ->
+      receive 
+  <{'Flush', _}> when 'true' -> apply 'flush_type'/1 ('ok')
+  <_> when 'true' -> 'ok' after 0 -> 'timeout'
+'worker'/1 =
+    fun (_) ->
+      receive 
+  <{'Task', {Id, Work}}> when 'true' -> let <Result> = call 'erlang':'+' (Work, 1) in let <V_12> = {Id, Result} in apply 'worker'/1 ('ok')
+  <{'Priority', Task}> when 'true' -> let <V_13> = Task in apply 'worker'/1 ('ok')
+  <'Quit'> when 'true' -> 'ok' after 'infinity' -> 'ok'
+'collect_until_done'/1 =
+    fun (Acc) ->
+      receive 
+  <{'Item', X}> when 'true' -> apply 'collect_until_done'/1 ([X|Acc])
+  <'Done'> when 'true' -> Acc after 'infinity' -> 'ok'
+'selective_demo'/1 =
+    fun (_) ->
+      let <Me> = call 'erlang':'self' () in let <V_18> = call 'erlang':'!' (Me, {'Msg', #{#<65>(8,1,'integer',['unsigned'|['big']])}#}) in let <V_17> = call 'erlang':'!' (Me, {'Msg', #{#<66>(8,1,'integer',['unsigned'|['big']])}#}) in let <V_16> = call 'erlang':'!' (Me, {'Msg', #{#<67>(8,1,'integer',['unsigned'|['big']])}#}) in let <V_15> = call 'erlang':'!' (Me, 'Done') in let <B> = receive 
+  <{'Msg', #{#<66>(8,1,'integer',['unsigned'|['big']])}#}> when 'true' -> #{#<103>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<66>(8,1,'integer',['unsigned'|['big']])}# after 'infinity' -> 'ok' in let <A> = receive 
+  <{'Msg', #{#<65>(8,1,'integer',['unsigned'|['big']])}#}> when 'true' -> #{#<103>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<65>(8,1,'integer',['unsigned'|['big']])}# after 'infinity' -> 'ok' in let <C> = receive 
+  <{'Msg', #{#<67>(8,1,'integer',['unsigned'|['big']])}#}> when 'true' -> #{#<103>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<67>(8,1,'integer',['unsigned'|['big']])}# after 'infinity' -> 'ok' in let <V_14> = receive 
+  <'Done'> when 'true' -> #{#<100>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<110>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']])}# after 'infinity' -> 'ok' in {A, B, C}
+end

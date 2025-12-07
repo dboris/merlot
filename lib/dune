@@ -1,0 +1,8 @@
+(library
+ (name merlot)
+ (public_name merlot)
+ (libraries compiler-libs.common compiler-libs.bytecomp)
+ (flags (:standard -w -50-39)))
+
+(documentation
+ (package merlot))

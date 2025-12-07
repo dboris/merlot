@@ -1,0 +1,15 @@
+module 'Merlot.Math_lib' ['add'/2,
+                       'mul'/2,
+                       'square'/1]
+    attributes []
+
+'add'/2 =
+    fun (X, Y) ->
+      call 'erlang':'+' (X, Y)
+'mul'/2 =
+    fun (X, Y) ->
+      call 'erlang':'*' (X, Y)
+'square'/1 =
+    fun (X) ->
+      apply 'mul'/2 (X, X)
+end

@@ -1,0 +1,6 @@
+(test
+ (name test_merlot)
+ (libraries merlot alcotest)
+ (deps
+  (glob_files cases/*.ml)
+  (glob_files expected/*.core)))

@@ -1,0 +1,29 @@
+module 'Merlot.Option' ['none'/1,
+                       'some'/1,
+                       'is_some'/1,
+                       'get_or_default'/2,
+                       'map'/2]
+    attributes []
+
+'none'/1 =
+    fun (_) ->
+      'none'
+'some'/1 =
+    fun (X) ->
+      {'some', X}
+'is_some'/1 =
+    fun (Param) ->
+      case Param of 
+  <'none'> when 'true' -> 'false'
+  <{'some', _}> when 'true' -> 'true' end
+'get_or_default'/2 =
+    fun (Default, Param) ->
+      case Param of 
+  <'none'> when 'true' -> Default
+  <{'some', X}> when 'true' -> X end
+'map'/2 =
+    fun (F, Param) ->
+      case Param of 
+  <'none'> when 'true' -> 'none'
+  <{'some', X}> when 'true' -> {'some', apply F (X)} end
+end

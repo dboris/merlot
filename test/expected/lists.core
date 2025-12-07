@@ -1,0 +1,31 @@
+module 'Merlot.Lists' ['empty'/1,
+                       'singleton'/1,
+                       'pair'/2,
+                       'cons'/2,
+                       'head'/1,
+                       'tail'/1]
+    attributes []
+
+'empty'/1 =
+    fun (_) ->
+      []
+'singleton'/1 =
+    fun (X) ->
+      [X|[]]
+'pair'/2 =
+    fun (X, Y) ->
+      [X|[Y|[]]]
+'cons'/2 =
+    fun (H, T) ->
+      [H|T]
+'head'/1 =
+    fun (Param) ->
+      case Param of 
+  <[]> when 'true' -> 0
+  <[X|_]> when 'true' -> X end
+'tail'/1 =
+    fun (Param) ->
+      case Param of 
+  <[]> when 'true' -> []
+  <[_|Xs]> when 'true' -> Xs end
+end

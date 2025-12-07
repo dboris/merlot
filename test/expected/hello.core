@@ -1,0 +1,30 @@
+module 'Merlot.Hello' ['hello'/1,
+                       'add'/2,
+                       'factorial'/1]
+    attributes []
+
+'hello'/1 =
+    fun (_) ->
+      #{#<72>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<44>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<87>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<100>(8,1,'integer',['unsigned'|['big']]),
+#<33>(8,1,'integer',['unsigned'|['big']])}#
+'add'/2 =
+    fun (X, Y) ->
+      call 'erlang':'+' (X, Y)
+'factorial'/1 =
+    fun (N) ->
+      letrec 'loop'/2 = fun (Acc, N) -> case call 'erlang':'=<' (N, 1) of
+  <'true'> when 'true' -> Acc
+  <'false'> when 'true' -> apply 'loop'/2 (call 'erlang':'*' (Acc, N), call 'erlang':'-' (N, 1))
+end in apply 'loop'/2 (1, N)
+end

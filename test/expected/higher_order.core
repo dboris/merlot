@@ -1,0 +1,33 @@
+module 'Merlot.Higher_order' ['double'/1,
+                       'add1'/1,
+                       'apply_twice'/2,
+                       'map'/2,
+                       'test_lambda'/1,
+                       'test_apply_twice'/1,
+                       'test_map'/1]
+    attributes []
+
+'double'/1 =
+    fun (X) ->
+      call 'erlang':'*' (X, 2)
+'add1'/1 =
+    fun (X) ->
+      call 'erlang':'+' (X, 1)
+'apply_twice'/2 =
+    fun (F, X) ->
+      apply F (apply F (X))
+'map'/2 =
+    fun (F, Lst) ->
+      case Lst of 
+  <[]> when 'true' -> []
+  <[X|Xs]> when 'true' -> [apply F (X)|apply 'map'/2 (F, Xs)] end
+'test_lambda'/1 =
+    fun (_) ->
+      let <F> = fun (X) -> call 'erlang':'+' (X, 1) in apply F (5)
+'test_apply_twice'/1 =
+    fun (_) ->
+      apply 'apply_twice'/2 ('double'/1, 3)
+'test_map'/1 =
+    fun (_) ->
+      apply 'map'/2 ('add1'/1, [1|[2|[3|[]]]])
+end

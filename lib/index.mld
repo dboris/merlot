@@ -1,0 +1,207 @@
+{0 Merlot - OCaml to BEAM Compiler}
+
+Merlot compiles OCaml source files to BEAM bytecode for the Erlang VM,
+enabling OCaml programs to run on the battle-tested Erlang runtime with
+its actor-based concurrency and fault tolerance.
+
+{1 Overview}
+
+Merlot provides:
+
+- Full OCaml type inference and pattern matching
+- Erlang/Elixir interoperability via FFI
+- Actor-based concurrency primitives
+- OTP supervisor support
+- EEP-48 compatible documentation generation
+
+{1 Quick Start}
+
+Compile an OCaml file to BEAM:
+
+{[
+merlot hello.ml
+]}
+
+The compiler produces a [.beam] file that can be run with the Erlang VM:
+
+{[
+erl -noshell -eval "hello:main(ok), halt()."
+]}
+
+{1 Library Modules}
+
+The compiler library consists of these modules:
+
+- {!module:Merlot.Compile} - Parse and typecheck OCaml source
+- {!module:Merlot.Typed_to_beam} - Convert typed AST to BEAM IR
+- {!module:Merlot.Beam_ir} - BEAM intermediate representation
+- {!module:Merlot.Core_erlang} - Core Erlang code generation
+- {!module:Merlot.Doc_extract} - Documentation extraction (EEP-48)
+
+{1 Standard Library}
+
+The standard library provides OCaml-style APIs that map to Erlang/Elixir:
+
+- {!module:Merlot_stdlib.Option} - Option type operations
+- {!module:Merlot_stdlib.Result} - Result type operations
+- {!module:Merlot_stdlib.List} - List operations (maps to Erlang lists)
+- {!module:Merlot_stdlib.Process} - Erlang process primitives
+- {!module:Merlot_stdlib.Actor} - Actor abstraction
+- {!module:Merlot_stdlib.Supervisor} - OTP supervisor support
+- {!module:Merlot_stdlib.Enum} - Elixir Enum functions
+- {!module:Merlot_stdlib.Map} - Erlang maps
+
+{1 Erlang Interoperability}
+
+Merlot compiles OCaml types to natural Erlang representations, making interop
+seamless with existing Erlang and Elixir code.
+
+{2 Type Mappings}
+
+{3 Basic Types}
+
+{t
+| OCaml              | Erlang            | Example OCaml        | Example Erlang     |
+|--------------------|-------------------|----------------------|--------------------|
+| [int]              | integer           | [42]                 | [42]               |
+| [float]            | float             | [3.14]               | [3.14]             |
+| [char]             | integer           | ['a']                | [$a]               |
+| [string]           | binary            | ["hello"]            | [<<"hello">>]      |
+| [bool]             | atom              | [true], [false]      | ['true'], ['false']|
+| [unit]             | atom              | [()]                 | ['ok']             |
+| [(a, b)]           | tuple             | [(1, "x")]           | [{1, <<"x">>}]     |
+| [list]             | list              | [[1; 2; 3]]          | [[1, 2, 3]]        |
+}
+
+{3 Variants and Constructors}
+
+Regular variants without payloads become lowercase atoms:
+
+{[
+type color = Red | Green | Blue
+(* Red -> 'red', Green -> 'green', Blue -> 'blue' *)
+]}
+
+Variants with payloads become tagged tuples:
+
+{[
+type option = None | Some of int
+(* None -> 'none'
+   Some 42 -> {'some', 42} *)
+
+type result = Ok of string | Error of string
+(* Ok "done" -> {'ok', <<"done">>}
+   Error "fail" -> {'error', <<"fail">>} *)
+]}
+
+{3 Polymorphic Variants}
+
+Polymorphic variants preserve their tag names as atoms:
+
+{[
+let msg = `Ping
+(* `Ping -> 'Ping' *)
+
+let msg = `Data 42
+(* `Data 42 -> {'Data', 42} *)
+]}
+
+This makes them ideal for message passing in actor systems:
+
+{[
+Process.send pid `Stop      (* sends atom 'Stop' *)
+Process.send pid (`Ping me) (* sends tuple {'Ping', Me} *)
+]}
+
+{3 Records}
+
+Records become tuples with the record name as the first element (tag):
+
+{[
+type person = { name: string; age: int }
+let p = { name = "Alice"; age = 30 }
+(* -> {'person', <<"Alice">>, 30} *)
+]}
+
+Field access uses [erlang:element/2]:
+
+{[
+p.name  (* -> erlang:element(2, P) *)
+p.age   (* -> erlang:element(3, P) *)
+]}
+
+{3 Functions}
+
+OCaml functions map directly to Erlang funs:
+
+{[
+let add x y = x + y
+(* -> add(X, Y) -> X + Y. *)
+
+let f = fun x -> x + 1
+(* -> fun(X) -> X + 1 end *)
+]}
+
+{3 Option and Result}
+
+The standard [option] and [result] types use Erlang conventions:
+
+{[
+(* Option *)
+None       (* -> 'none' *)
+Some x     (* -> {'some', X} *)
+
+(* Result *)
+Ok x       (* -> {'ok', X} *)
+Error e    (* -> {'error', E} *)
+]}
+
+{2 Pattern Matching}
+
+OCaml patterns translate directly to Erlang:
+
+{[
+match msg with
+| `Ping sender -> ...
+| `Pong -> ...
+| `Data n when n > 0 -> ...
+
+(*
+  case Msg of
+    {'Ping', Sender} -> ...;
+    'Pong' -> ...;
+    {'Data', N} when N > 0 -> ...
+  end
+*)
+]}
+
+{1 Erlang FFI}
+
+Define external functions to call Erlang/Elixir:
+
+{[
+external spawn : (unit -> 'a) -> pid = "erlang" "spawn"
+external send : pid -> 'a -> 'a = "erlang" "!"
+]}
+
+{1 Example: Ping-Pong Actors}
+
+{[
+let rec pong () =
+  Process.receive (function
+    | `Ping sender ->
+        let _ = Process.send sender `Pong in
+        pong ()
+    | `Stop -> ())
+
+let ping pong_pid =
+  let me = Process.self () in
+  let _ = Process.send pong_pid (`Ping me) in
+  Process.receive (function `Pong -> `Got_pong)
+]}
+
+{1 Resources}
+
+- {{:https://github.com/dboris/merlot} GitHub Repository}
+- {{:https://github.com/dboris/merlot/blob/master/docs/core_erlang-1.0.3.pdf} Core Erlang 1.0.3 Specification (PDF)}
+- {{:https://www.erlang.org/eeps/eep-0048} EEP-48 Documentation Format}

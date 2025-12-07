@@ -1,0 +1,35 @@
+module 'Merlot.Processes' ['pong'/1,
+                       'start_pong'/1,
+                       'ping'/1,
+                       'wait_with_timeout'/1,
+                       'counter_loop'/1,
+                       'start_counter'/1]
+    attributes []
+
+'pong'/1 =
+    fun (_) ->
+      receive 
+  <{'Ping', Sender}> when 'true' -> let <V_2> = call 'erlang':'!' (Sender, 'Pong') in apply 'pong'/1 ('ok')
+  <'Stop'> when 'true' -> 'ok' after 'infinity' -> 'ok'
+'start_pong'/1 =
+    fun (_) ->
+      call 'erlang':'spawn' (fun () -> apply 'pong'/1 ('ok'))
+'ping'/1 =
+    fun (Pong_pid) ->
+      let <Me> = call 'erlang':'self' () in let <V_3> = call 'erlang':'!' (Pong_pid, {'Ping', Me}) in receive 
+  <'Pong'> when 'true' -> 'Got_pong' after 'infinity' -> 'ok'
+'wait_with_timeout'/1 =
+    fun (_) ->
+      receive 
+  <{'Message', X}> when 'true' -> X after 1000 -> 'timeout'
+'counter_loop'/1 =
+    fun (Count) ->
+      receive 
+  <'Inc'> when 'true' -> apply 'counter_loop'/1 (call 'erlang':'+' (Count, 1))
+  <'Dec'> when 'true' -> apply 'counter_loop'/1 (call 'erlang':'-' (Count, 1))
+  <{'Get', Sender}> when 'true' -> let <V_5> = call 'erlang':'!' (Sender, Count) in apply 'counter_loop'/1 (Count)
+  <'Stop'> when 'true' -> Count after 'infinity' -> 'ok'
+'start_counter'/1 =
+    fun (_) ->
+      call 'erlang':'spawn' (fun () -> apply 'counter_loop'/1 (0))
+end

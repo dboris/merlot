@@ -1,0 +1,18 @@
+/_build
+/_opam
+
+# OCaml artifacts
+*.cmi
+*.cmo
+*.cma
+*.cmx
+*.cmxa
+*.cmxs
+*.cmt
+*.cmti
+
+# Core Erlang / BEAM artifacts
+*.core
+!test/expected/*.core
+*.beam
+erl_crash.dump

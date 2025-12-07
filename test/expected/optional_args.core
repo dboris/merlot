@@ -1,0 +1,23 @@
+module 'Merlot.Optional_args' ['greet'/2,
+                       'calculate'/3,
+                       'main'/1]
+    attributes []
+
+'greet'/2 =
+    fun (Opt_1, N) ->
+      case Opt_1 of 
+  <{'some', Multiplier}> when 'true' -> call 'erlang':'*' (N, Multiplier)
+  <'none'> when 'true' -> let <Multiplier> = 2 in call 'erlang':'*' (N, Multiplier) end
+'calculate'/3 =
+    fun (Opt_2, Opt_3, X) ->
+      case Opt_2 of 
+  <{'some', Add}> when 'true' -> case Opt_3 of 
+  <{'some', Mult}> when 'true' -> call 'erlang':'*' (call 'erlang':'+' (X, Add), Mult)
+  <'none'> when 'true' -> let <Mult> = 1 in call 'erlang':'*' (call 'erlang':'+' (X, Add), Mult) end
+  <'none'> when 'true' -> let <Add> = 0 in case Opt_3 of 
+  <{'some', Mult}> when 'true' -> call 'erlang':'*' (call 'erlang':'+' (X, Add), Mult)
+  <'none'> when 'true' -> let <Mult> = 1 in call 'erlang':'*' (call 'erlang':'+' (X, Add), Mult) end end
+'main'/1 =
+    fun (_) ->
+      let <R1> = apply 'greet'/2 ('none', 5) in let <R2> = apply 'greet'/2 ({'some', 3}, 5) in let <R3> = apply 'calculate'/3 ('none', 'none', 10) in let <R4> = apply 'calculate'/3 ({'some', 5}, 'none', 10) in let <R5> = apply 'calculate'/3 ({'some', 5}, {'some', 2}, 10) in {R1, R2, R3, R4, R5}
+end

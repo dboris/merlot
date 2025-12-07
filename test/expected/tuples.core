@@ -1,0 +1,26 @@
+module 'Merlot.Tuples' ['pair'/2,
+                       'fst'/1,
+                       'snd'/1,
+                       'swap'/1,
+                       'triple'/3]
+    attributes []
+
+'pair'/2 =
+    fun (X, Y) ->
+      {X, Y}
+'fst'/1 =
+    fun (Param_1) ->
+      case Param_1 of 
+  <{X, _}> when 'true' -> X end
+'snd'/1 =
+    fun (Param_2) ->
+      case Param_2 of 
+  <{_, Y}> when 'true' -> Y end
+'swap'/1 =
+    fun (Param_3) ->
+      case Param_3 of 
+  <{X, Y}> when 'true' -> {Y, X} end
+'triple'/3 =
+    fun (A, B, C) ->
+      {A, B, C}
+end

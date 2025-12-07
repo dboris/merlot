@@ -1,0 +1,36 @@
+module 'Merlot.Variants' ['red'/1,
+                       'green'/1,
+                       'blue'/1,
+                       'circle'/1,
+                       'rect'/2,
+                       'color_to_int'/1,
+                       'area'/1]
+    attributes []
+
+'red'/1 =
+    fun (_) ->
+      'red'
+'green'/1 =
+    fun (_) ->
+      'green'
+'blue'/1 =
+    fun (_) ->
+      'blue'
+'circle'/1 =
+    fun (R) ->
+      {'circle', R}
+'rect'/2 =
+    fun (W, H) ->
+      {'rectangle', W, H}
+'color_to_int'/1 =
+    fun (Param) ->
+      case Param of 
+  <'red'> when 'true' -> 0
+  <'green'> when 'true' -> 1
+  <'blue'> when 'true' -> 2 end
+'area'/1 =
+    fun (Param) ->
+      case Param of 
+  <{'circle', R}> when 'true' -> call 'erlang':'*' (call 'erlang':'*' (R, R), 3.141590)
+  <{'rectangle', W, H}> when 'true' -> call 'erlang':'*' (W, H) end
+end
