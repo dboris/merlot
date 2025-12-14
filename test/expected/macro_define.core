@@ -1,0 +1,23 @@
+module 'Merlot.Macro_define' ['unless'/2,
+                       'safe_divide'/2]
+    attributes []
+
+'unless'/2 =
+    fun (Param, Param) ->
+      call 'erlang':'raise' ('error', {'failure', #{#<109>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<99>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<117>(8,1,'integer',['unsigned'|['big']]),
+#<98>(8,1,'integer',['unsigned'|['big']])}#}, [])
+'safe_divide'/2 =
+    fun (X, Y) ->
+      case call 'erlang':'not' (call 'erlang':'=:=' (Y, 0)) of
+  <'true'> when 'true' -> call 'erlang':'div' (X, Y)
+  <'false'> when 'true' -> 'ok'
+end
+end

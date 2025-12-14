@@ -14,7 +14,7 @@
    Requires Elixir to be installed alongside Erlang/OTP.
 *)
 
-open Merlot_elixir
+open Merlot_stdlib
 
 (* Square a number *)
 let square x = x * x

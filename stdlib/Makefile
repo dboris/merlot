@@ -10,7 +10,7 @@
 MERLOT = ../_build/default/bin/main.exe
 
 # Safe modules that don't conflict with Erlang or OCaml stdlib
-SAFE_MODULES = actor enum keyword map option process result supervisor
+SAFE_MODULES = actor enum inspect keyword map option process result supervisor
 
 # Generate targets with Merlot. prefix
 PREFIXED_MODULES = $(addprefix Merlot.,$(shell echo $(SAFE_MODULES) | sed 's/\b\([a-z]\)/\u\1/g'))
@@ -32,6 +32,9 @@ Merlot.Actor.core: actor.ml
 	cd .. && _build/default/bin/main.exe --emit-core stdlib/$<
 
 Merlot.Enum.core: enum.ml
+	cd .. && _build/default/bin/main.exe --emit-core stdlib/$<
+
+Merlot.Inspect.core: inspect.ml
 	cd .. && _build/default/bin/main.exe --emit-core stdlib/$<
 
 Merlot.Keyword.core: keyword.ml

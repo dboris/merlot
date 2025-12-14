@@ -1,4 +1,6 @@
-module 'Merlot.Variants' ['red'/1,
+module 'Merlot.Variants' ['pp_color'/1,
+                       'pp_shape'/1,
+                       'red'/1,
                        'green'/1,
                        'blue'/1,
                        'circle'/1,
@@ -7,6 +9,46 @@ module 'Merlot.Variants' ['red'/1,
                        'area'/1]
     attributes []
 
+'pp_color'/1 =
+    fun (V) ->
+      case V of 
+  <'red'> when 'true' -> #{#<82>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<100>(8,1,'integer',['unsigned'|['big']])}#
+  <'green'> when 'true' -> #{#<71>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<110>(8,1,'integer',['unsigned'|['big']])}#
+  <'blue'> when 'true' -> #{#<66>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<117>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']])}# end
+'pp_shape'/1 =
+    fun (V) ->
+      case V of 
+  <{'circle', Arg_0}> when 'true' -> call 'erlang':'iolist_to_binary' ([#{#<67>(8,1,'integer',['unsigned'|['big']]),
+#<105>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<99>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' (call 'io_lib':'format' (#{#<126>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']])}#, [Arg_0]))])
+  <{'rectangle', Arg_0, Arg_1}> when 'true' -> call 'erlang':'iolist_to_binary' ([#{#<82>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<99>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<110>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<40>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([call 'erlang':'iolist_to_binary' (call 'io_lib':'format' (#{#<126>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']])}#, [Arg_0])), #{#<44>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' (call 'io_lib':'format' (#{#<126>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']])}#, [Arg_1]))]), #{#<41>(8,1,'integer',['unsigned'|['big']])}#]) end
 'red'/1 =
     fun (_) ->
       'red'

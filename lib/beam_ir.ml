@@ -4,6 +4,9 @@
     1. Independent of OCaml compiler version
     2. Close to Core Erlang semantics
     3. Simple and stable for long-term maintenance
+
+    The IR also supports macro constructs (quote/unquote/splice) which are
+    expanded before code generation. See macro_expand.ml for the expansion logic.
 *)
 
 (** Source location information *)
@@ -14,6 +17,26 @@ type loc = {
 }
 
 let no_loc = { file = ""; line = 0; col = 0 }
+
+(** Hygiene context for macro-generated variables.
+    Variables with the same name but different contexts are distinct.
+    This prevents macro-introduced variables from capturing user variables. *)
+type hygiene_ctx = {
+  macro_name: string;      (** Name of the macro that introduced this variable *)
+  expansion_id: int;       (** Unique ID for this macro expansion *)
+}
+
+(** Variable reference with optional hygiene context *)
+type var_ref = {
+  var_name: string;
+  var_ctx: hygiene_ctx option;  (** None = caller context (unhygienic) *)
+}
+
+(** Create a simple variable reference (caller context) *)
+let var name = { var_name = name; var_ctx = None }
+
+(** Create a hygienic variable reference *)
+let hygienic_var name ctx = { var_name = name; var_ctx = Some ctx }
 
 (** Literal values *)
 type literal =
@@ -33,10 +56,11 @@ type pattern =
   | Pat_cons of pattern * pattern  (** List cons [H|T] *)
   | Pat_record of (string * pattern) list  (** Record pattern (future) *)
   | Pat_alias of pattern * string  (** Pattern with alias (P = Var) *)
+  | Pat_inject of string      (** Unhygienic variable binding (Macro.expose_binding) *)
 
 (** Binary operators *)
 type binop =
-  | Op_add | Op_sub | Op_mul | Op_div | Op_mod
+  | Op_add | Op_sub | Op_mul | Op_div | Op_idiv | Op_mod
   | Op_eq | Op_ne | Op_lt | Op_le | Op_gt | Op_ge
   | Op_and | Op_or
   | Op_band | Op_bor | Op_bxor | Op_bsl | Op_bsr
@@ -93,6 +117,11 @@ type expr =
       else_: expr;
     }
   | Expr_seq of expr * expr                 (** Sequence (do E1, E2) *)
+  | Expr_map of (expr * expr) list          (** Map literal #{ K1 => V1, K2 => V2 } *)
+  | Expr_map_update of {                    (** Map update M#{ K => V } *)
+      map: expr;
+      updates: (expr * expr) list;
+    }
   | Expr_try of {                           (** Try-catch *)
       body: expr;
       catch_var: string * string * string;  (* Class, Reason, Stack *)
@@ -106,6 +135,19 @@ type expr =
       name: string;
       args: expr list;
     }
+  (* Macro constructs - expanded before code generation *)
+  | Expr_quote of expr                      (** Quoted expression [%quote ...] *)
+  | Expr_unquote of string                  (** Unquote a value [%u name] *)
+  | Expr_splice of string                   (** Splice an AST fragment [%s name] *)
+  | Expr_stringify of string                (** Convert splice to string [%stringify name] *)
+
+(** Macro definition *)
+type macro_def = {
+  macro_name: string;
+  macro_params: string list;
+  macro_body: expr;         (** The quoted template *)
+  macro_loc: loc;
+}
 
 (** Function definition *)
 type fun_def = {
@@ -151,12 +193,15 @@ let rec pp_pattern fmt = function
         fields
   | Pat_alias (pat, var) ->
       Format.fprintf fmt "%a = %s" pp_pattern pat var
+  | Pat_inject var ->
+      Format.fprintf fmt "(inject %s)" var
 
 let pp_binop fmt = function
   | Op_add -> Format.fprintf fmt "+"
   | Op_sub -> Format.fprintf fmt "-"
   | Op_mul -> Format.fprintf fmt "*"
   | Op_div -> Format.fprintf fmt "/"
+  | Op_idiv -> Format.fprintf fmt "div"
   | Op_mod -> Format.fprintf fmt "rem"
   | Op_eq -> Format.fprintf fmt "=:="
   | Op_ne -> Format.fprintf fmt "=/="
@@ -177,6 +222,73 @@ let pp_unop fmt = function
   | Op_neg -> Format.fprintf fmt "-"
   | Op_not -> Format.fprintf fmt "not"
   | Op_bnot -> Format.fprintf fmt "bnot"
+
+(** Pretty-print an expression in a human-readable form (for stringify) *)
+let rec pp_expr fmt = function
+  | Expr_var name -> Format.fprintf fmt "%s" name
+  | Expr_lit lit -> pp_literal fmt lit
+  | Expr_tuple exprs ->
+      Format.fprintf fmt "(%a)"
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_expr)
+        exprs
+  | Expr_list exprs ->
+      Format.fprintf fmt "[%a]"
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_expr)
+        exprs
+  | Expr_cons (hd, tl) ->
+      Format.fprintf fmt "[%a | %a]" pp_expr hd pp_expr tl
+  | Expr_binary (op, e1, e2) ->
+      Format.fprintf fmt "(%a %a %a)" pp_expr e1 pp_binop op pp_expr e2
+  | Expr_unary (op, e) ->
+      Format.fprintf fmt "(%a %a)" pp_unop op pp_expr e
+  | Expr_apply (func, args) ->
+      Format.fprintf fmt "%a(%a)" pp_expr func
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_expr)
+        args
+  | Expr_local_call { func_name; args; _ } ->
+      Format.fprintf fmt "%s(%a)" func_name
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_expr)
+        args
+  | Expr_call { module_; func; args } ->
+      Format.fprintf fmt "%a:%a(%a)" pp_expr module_ pp_expr func
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_expr)
+        args
+  | Expr_fun { params; _ } ->
+      Format.fprintf fmt "fun(%a) -> ..."
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ")
+          Format.pp_print_string)
+        params
+  | Expr_fun_ref { func_name; arity } ->
+      Format.fprintf fmt "fun %s/%d" func_name arity
+  | Expr_let { var; value; body } ->
+      Format.fprintf fmt "let %s = %a in %a" var pp_expr value pp_expr body
+  | Expr_letrec _ -> Format.fprintf fmt "letrec ..."
+  | Expr_case { scrutinee; _ } ->
+      Format.fprintf fmt "case %a of ..." pp_expr scrutinee
+  | Expr_if { cond; _ } ->
+      Format.fprintf fmt "if %a then ... else ..." pp_expr cond
+  | Expr_seq (e1, e2) ->
+      Format.fprintf fmt "%a; %a" pp_expr e1 pp_expr e2
+  | Expr_map pairs ->
+      let pp_pair fmt (k, v) = Format.fprintf fmt "%a => %a" pp_expr k pp_expr v in
+      Format.fprintf fmt "#{%a}"
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_pair)
+        pairs
+  | Expr_map_update { map; updates } ->
+      let pp_pair fmt (k, v) = Format.fprintf fmt "%a => %a" pp_expr k pp_expr v in
+      Format.fprintf fmt "%a#{%a}" pp_expr map
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_pair)
+        updates
+  | Expr_try _ -> Format.fprintf fmt "try ... catch ..."
+  | Expr_receive _ -> Format.fprintf fmt "receive ..."
+  | Expr_primop { name; args } ->
+      Format.fprintf fmt "primop %s(%a)" name
+        (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ") pp_expr)
+        args
+  | Expr_quote inner -> Format.fprintf fmt "quote(%a)" pp_expr inner
+  | Expr_unquote name -> Format.fprintf fmt "unquote(%s)" name
+  | Expr_splice name -> Format.fprintf fmt "splice(%s)" name
+  | Expr_stringify name -> Format.fprintf fmt "stringify(%s)" name
 
 (** Check if an expression is legal as a Core Erlang guard.
     Guards can only contain:
@@ -208,5 +320,14 @@ let rec is_legal_guard expr =
   | Expr_let _ | Expr_letrec _ -> false  (* Bindings are illegal *)
   | Expr_case _ | Expr_if _ -> false  (* Control flow is illegal *)
   | Expr_seq _ -> false  (* Sequences are illegal *)
+  | Expr_map pairs ->
+      (* Map literals are legal in guards if all keys/values are legal *)
+      List.for_all (fun (k, v) -> is_legal_guard k && is_legal_guard v) pairs
+  | Expr_map_update { map; updates } ->
+      (* Map updates are legal in guards *)
+      is_legal_guard map &&
+      List.for_all (fun (k, v) -> is_legal_guard k && is_legal_guard v) updates
   | Expr_try _ | Expr_receive _ -> false  (* Effects are illegal *)
   | Expr_primop _ -> false  (* Primops are illegal *)
+  (* Macro constructs should be expanded before guard checking *)
+  | Expr_quote _ | Expr_unquote _ | Expr_splice _ | Expr_stringify _ -> false

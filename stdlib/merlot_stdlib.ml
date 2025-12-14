@@ -91,3 +91,13 @@ module Actor = Actor
 
 (** Supervisor for fault-tolerant process trees *)
 module Supervisor = Supervisor
+
+(** {1 Metaprogramming} *)
+
+(** Compile-time macro primitives *)
+module Macro = Macro
+
+(** {1 Debugging} *)
+
+(** Term inspection and debugging utilities *)
+module Inspect = Inspect

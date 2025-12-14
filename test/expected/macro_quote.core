@@ -1,0 +1,11 @@
+module 'Merlot.Macro_quote' ['quoted_add'/1,
+                       'make_add_ast'/2]
+    attributes []
+
+'quoted_add'/1 =
+    fun (_) ->
+      call 'erlang':'+' (1, 2)
+'make_add_ast'/2 =
+    fun (X, Y) ->
+      call 'erlang':'+' (X, Y)
+end

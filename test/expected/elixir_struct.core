@@ -1,0 +1,68 @@
+module 'Elixir.Elixir_struct' ['__struct__'/0,
+                       '__struct__'/1,
+                       'pp_t'/1,
+                       'pp_point'/1,
+                       'create'/2,
+                       'get_name'/1,
+                       'get_age'/1,
+                       'birthday'/1,
+                       'make_point'/2,
+                       'get_x'/1,
+                       'get_y'/1]
+    attributes []
+
+'__struct__'/0 =
+    fun () ->
+      ~{'__struct__' => 'Elixir.Elixir_struct', 'name' => 'nil', 'age' => 'nil'}~
+'__struct__'/1 =
+    fun (Overrides) ->
+      call 'maps':'merge' (call 'Elixir.Elixir_struct':'__struct__' (), call 'maps':'from_list' (Overrides))
+'pp_t'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<110>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<109>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (2, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (3, V)), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
+'pp_point'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<120>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (2, V)), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<121>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (3, V)), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
+'create'/2 =
+    fun (Name, Age) ->
+      ~{'__struct__' => 'Elixir.Elixir_struct', 'name' => Name, 'age' => Age}~
+'get_name'/1 =
+    fun (P) ->
+      call 'maps':'get' ('name', P)
+'get_age'/1 =
+    fun (P) ->
+      call 'maps':'get' ('age', P)
+'birthday'/1 =
+    fun (P) ->
+      ~{'__struct__' => 'Elixir.Elixir_struct', 'name' => call 'maps':'get' ('name', P), 'age' => call 'erlang':'+' (call 'maps':'get' ('age', P), 1)}~
+'make_point'/2 =
+    fun (X, Y) ->
+      {'point', X, Y}
+'get_x'/1 =
+    fun (Pt) ->
+      call 'erlang':'element' (2, Pt)
+'get_y'/1 =
+    fun (Pt) ->
+      call 'erlang':'element' (3, Pt)
+end

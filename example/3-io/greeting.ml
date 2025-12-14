@@ -20,7 +20,7 @@ let print_banner () =
 (* Ask for name and greet *)
 let greet () =
   Io.put_chars "What is your name? ";
-  let name = String_utils.trim (Io.get_line "") in
+  let name = String.trim (Io.get_line "") in
   println "";
   println ("Hello, " ^ name ^ "!");
   println ("Nice to meet you, " ^ name ^ "!");

@@ -5,7 +5,7 @@
       merlot init <project-name>
 *)
 
-let version = "0.1.0"
+let version = Printf.sprintf "%s (built %s)" Version_info.version Version_info.build_time
 
 (** Find stdlib directory relative to executable or build location *)
 let find_stdlib_dir () =
@@ -38,6 +38,9 @@ let makefile_template _project_name = {|.PHONY: all clean run shell
 # Merlot compiler - adjust path as needed
 MERLOT ?= merlot
 
+# Stdlib BEAM path - auto-detect from opam
+MERLOT_STDLIB ?= $(shell opam var merlot:lib 2>/dev/null)/beam
+
 # Source files - compiled beam files go in ebin/
 SOURCES = $(wildcard src/*.ml)
 
@@ -51,10 +54,10 @@ compile-%: src/%.ml
 	$(MERLOT) $< -o ebin/
 
 run: all
-	@erl -noshell -pa ebin -eval "'Merlot.Main':main(ok), halt()."
+	@erl -noshell -pa ebin -pa $(MERLOT_STDLIB) -eval "'Merlot.Main':main(ok), halt()."
 
 shell: all
-	@erl -pa ebin -eval '[code:load_file(list_to_atom(filename:basename(F, ".beam"))) || F <- filelib:wildcard("ebin/*.beam")]'
+	@erl -pa ebin -pa $(MERLOT_STDLIB) -eval '[code:load_file(list_to_atom(filename:basename(F, ".beam"))) || F <- filelib:wildcard("ebin/*.beam")]'
 
 clean:
 	rm -rf ebin/*.beam ebin/*.core erl_crash.dump
@@ -205,10 +208,6 @@ let run_erlc core_file =
   if exit_code = 0 then Ok ()
   else Error (Printf.sprintf "erlc failed with exit code %d" exit_code)
 
-(** Add the Merlot. prefix to a module name for namespacing.
-    Must match the prefix in typed_to_beam.ml *)
-let prefixed_module_name name =
-  "Merlot." ^ String.capitalize_ascii name
 
 (** Determine output format from -o filename extension *)
 let output_wants_core output =
@@ -257,15 +256,16 @@ let compile_file ~input ~output ~include_dirs ~no_stdlib ~emit_core ~emit_docs =
           let dir = if dir = "." then "" else dir ^ "/" in
           (dir, None)
     in
-    let prefixed_name = prefixed_module_name module_name in
-    let core_file = output_dir ^ prefixed_name ^ ".core" in
-    let beam_file = output_dir ^ prefixed_name ^ ".beam" in
+    (* Use the actual module name from beam_module (respects [@@@elixir_struct]) *)
+    let actual_module_name = beam_module.name in
+    let core_file = output_dir ^ actual_module_name ^ ".core" in
+    let beam_file = output_dir ^ actual_module_name ^ ".beam" in
 
     (* Extract and generate documentation if requested *)
     if emit_docs then begin
       let doc = Merlot.Doc_extract.extract_module_doc module_name typedtree in
-      let md_file = output_dir ^ prefixed_name ^ ".md" in
-      let chunk_file = output_dir ^ prefixed_name ^ ".chunk" in
+      let md_file = output_dir ^ actual_module_name ^ ".md" in
+      let chunk_file = output_dir ^ actual_module_name ^ ".chunk" in
       Merlot.Doc_extract.write_markdown md_file doc;
       Merlot.Doc_extract.write_docs_chunk chunk_file doc;
       Printf.printf "Generated docs: %s, %s\n" md_file chunk_file
@@ -311,6 +311,8 @@ let compile_file ~input ~output ~include_dirs ~no_stdlib ~emit_core ~emit_docs =
       Error (Printf.sprintf "Type error:\n%s" (Buffer.contents buf))
   | Failure msg ->
       Error (Printf.sprintf "Compilation failed: %s" msg)
+  | Env.Error _ as e ->
+      Error (Printf.sprintf "Environment error: %s" (Printexc.to_string e))
   | e ->
       Error (Printf.sprintf "Unexpected error: %s" (Printexc.to_string e))
 

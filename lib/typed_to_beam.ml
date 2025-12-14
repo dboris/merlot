@@ -7,11 +7,58 @@
 open Beam_ir
 open Data_types
 
-(** Add the Merlot. prefix to a module name for namespacing.
-    This prevents conflicts with Erlang/OTP modules like 'supervisor' and 'process'.
-    Example: "process" -> "Merlot.Process" *)
+(** Elixir struct mode - when true, module uses Elixir-compatible conventions:
+    - Module prefix is "Elixir." instead of "Merlot."
+    - Records compile to maps with __struct__ key instead of tagged tuples
+    - __struct__/0 and __struct__/1 functions are auto-generated *)
+let elixir_struct_mode = ref false
+
+(** Track record type info for __struct__ generation when in elixir_struct mode *)
+type record_info = {
+  field_names: string list;
+}
+let elixir_struct_record : record_info option ref = ref None
+
+(** Store the module name for use in elixir_struct mode *)
+let current_module_name : string ref = ref ""
+
+(** Elixir type imports - types marked with [@@elixir] are compiled as maps.
+    Maps type name to optional explicit Elixir module name.
+    Example: "user" -> None means infer Elixir.User
+             "response" -> Some "Elixir.Plug.Conn.Response" for explicit name *)
+let elixir_types : (string, string option) Hashtbl.t = Hashtbl.create 16
+
+let reset_elixir_types () = Hashtbl.clear elixir_types
+
+let register_elixir_type type_name explicit_module =
+  Hashtbl.add elixir_types type_name explicit_module
+
+let is_elixir_type type_name =
+  Hashtbl.mem elixir_types type_name
+
+let reset_elixir_struct () =
+  elixir_struct_mode := false;
+  elixir_struct_record := None;
+  current_module_name := "";
+  reset_elixir_types ()
+
+(** Check if a structure item is the [@@@elixir_struct] attribute *)
+let is_elixir_struct_attribute (item : Typedtree.structure_item) : bool =
+  match item.str_desc with
+  | Tstr_attribute attr ->
+      attr.attr_name.txt = "elixir_struct"
+  | _ -> false
+
+(** Scan structure for [@@@elixir_struct] attribute *)
+let has_elixir_struct_attribute (str : Typedtree.structure) : bool =
+  List.exists is_elixir_struct_attribute str.str_items
+
+(** Add the appropriate prefix to a module name.
+    Uses "Elixir." in elixir_struct mode, otherwise "Merlot.".
+    Example: "person" -> "Elixir.Person" or "Merlot.Person" *)
 let prefixed_module_name name =
-  "Merlot." ^ String.capitalize_ascii name
+  let prefix = if !elixir_struct_mode then "Elixir." else "Merlot." in
+  prefix ^ String.capitalize_ascii name
 
 (** Fresh variable generation *)
 let var_counter = ref 0
@@ -67,16 +114,18 @@ let register_external id prim =
 let lookup_external id =
   Hashtbl.find_opt externals (Ident.unique_name id)
 
-(** Top-level functions map: name -> arity *)
-let top_level_functions : (string, int) Hashtbl.t = Hashtbl.create 16
+(** Top-level functions map: unique_name -> (display_name, arity)
+    We use unique_name as key to distinguish identically-named bindings
+    (e.g., local variable 'name' vs top-level function 'name') *)
+let top_level_functions : (string, string * int) Hashtbl.t = Hashtbl.create 16
 
 let reset_top_level_functions () = Hashtbl.clear top_level_functions
 
-let register_top_level_function name arity =
-  Hashtbl.add top_level_functions name arity
+let register_top_level_function id arity =
+  Hashtbl.add top_level_functions (Ident.unique_name id) (Ident.name id, arity)
 
-let lookup_top_level_function name =
-  Hashtbl.find_opt top_level_functions name
+let lookup_top_level_function id =
+  Hashtbl.find_opt top_level_functions (Ident.unique_name id)
 
 (** Compute function arity from its type *)
 let rec arity_of_type ty =
@@ -117,6 +166,302 @@ let rec path_to_string (path : Path.t) : string =
   | Pdot (p, s) -> path_to_string p ^ "." ^ s
   | Papply _ -> failwith "Papply not supported"
   | Pextra_ty _ -> failwith "Pextra_ty not supported"
+
+(* ============================================================================
+   Pretty-print function generation
+   ============================================================================ *)
+
+(** Generate a BEAM expression that formats a type as an OCaml-style string.
+    Returns an expression that evaluates to a string representation. *)
+let rec generate_pp_expr_for_type (ty : Types.type_expr) (value_expr : expr) : expr =
+  match Types.get_desc ty with
+  | Types.Tconstr (path, _, _) ->
+      let type_name = Path.last path in
+      (match type_name with
+       | "int" ->
+           (* Use Integer.to_string for integers *)
+           Expr_call {
+             module_ = Expr_lit (Lit_atom "erlang");
+             func = Expr_lit (Lit_atom "integer_to_binary");
+             args = [value_expr];
+           }
+       | "float" ->
+           (* Use io_lib:format with ~g for clean float formatting *)
+           Expr_call {
+             module_ = Expr_lit (Lit_atom "erlang");
+             func = Expr_lit (Lit_atom "iolist_to_binary");
+             args = [Expr_call {
+               module_ = Expr_lit (Lit_atom "io_lib");
+               func = Expr_lit (Lit_atom "format");
+               args = [Expr_lit (Lit_string "~g"); Expr_list [value_expr]];
+             }];
+           }
+       | "string" ->
+           (* Wrap string in quotes *)
+           Expr_call {
+             module_ = Expr_lit (Lit_atom "erlang");
+             func = Expr_lit (Lit_atom "iolist_to_binary");
+             args = [Expr_list [
+               Expr_lit (Lit_string "\"");
+               value_expr;
+               Expr_lit (Lit_string "\"");
+             ]];
+           }
+       | "bool" ->
+           (* Convert boolean atom to string *)
+           Expr_call {
+             module_ = Expr_lit (Lit_atom "erlang");
+             func = Expr_lit (Lit_atom "atom_to_binary");
+             args = [value_expr];
+           }
+       | "unit" ->
+           Expr_lit (Lit_string "()")
+       | "list" ->
+           (* For lists, use Inspect fallback for now *)
+           generate_inspect_fallback value_expr
+       | "option" ->
+           (* For options, use Inspect fallback *)
+           generate_inspect_fallback value_expr
+       | _ ->
+           (* For user-defined types, call local pp_<typename> function *)
+           Expr_local_call {
+             func_name = "pp_" ^ String.lowercase_ascii type_name;
+             arity = 1;
+             args = [value_expr];
+           })
+  | Types.Ttuple tys ->
+      (* For tuples, format each element *)
+      generate_tuple_pp tys value_expr
+  | Types.Tlink ty ->
+      generate_pp_expr_for_type ty value_expr
+  | Types.Tpoly (ty, _) ->
+      (* Unwrap polymorphic type scheme *)
+      generate_pp_expr_for_type ty value_expr
+  | Types.Tvar _ ->
+      (* For polymorphic types, use Inspect fallback *)
+      generate_inspect_fallback value_expr
+  | _ ->
+      (* Fallback: use Erlang's ~p format *)
+      generate_inspect_fallback value_expr
+
+(** Generate Inspect.to_string fallback for unknown types *)
+and generate_inspect_fallback value_expr =
+  Expr_call {
+    module_ = Expr_lit (Lit_atom "erlang");
+    func = Expr_lit (Lit_atom "iolist_to_binary");
+    args = [Expr_call {
+      module_ = Expr_lit (Lit_atom "io_lib");
+      func = Expr_lit (Lit_atom "format");
+      args = [Expr_lit (Lit_string "~p"); Expr_list [value_expr]];
+    }];
+  }
+
+(** Generate tuple pretty-printing: (a, b, c) -> "(a_str, b_str, c_str)" *)
+and generate_tuple_pp tys value_expr =
+  let n = List.length tys in
+  if n = 0 then Expr_lit (Lit_string "()")
+  else
+    (* Extract elements and format each *)
+    let parts = List.mapi (fun i (_, ty) ->
+      let elem_var = Printf.sprintf "Elem_%d" i in
+      let elem_expr = Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "element");
+        args = [Expr_lit (Lit_int (i + 1)); value_expr];
+      } in
+      (elem_var, generate_pp_expr_for_type ty elem_expr)
+    ) tys in
+    (* Build string: "(" ++ elem1 ++ ", " ++ elem2 ++ ... ++ ")" *)
+    let concat_all parts =
+      let rec build = function
+        | [] -> Expr_lit (Lit_string ")")
+        | [(_, pp_expr)] ->
+            Expr_call {
+              module_ = Expr_lit (Lit_atom "erlang");
+              func = Expr_lit (Lit_atom "iolist_to_binary");
+              args = [Expr_list [pp_expr; Expr_lit (Lit_string ")")]];
+            }
+        | (_, pp_expr) :: rest ->
+            Expr_call {
+              module_ = Expr_lit (Lit_atom "erlang");
+              func = Expr_lit (Lit_atom "iolist_to_binary");
+              args = [Expr_list [pp_expr; Expr_lit (Lit_string ", "); build rest]];
+            }
+      in
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "iolist_to_binary");
+        args = [Expr_list [Expr_lit (Lit_string "("); build parts]];
+      }
+    in
+    concat_all parts
+
+(** Generate a pp function for a record type *)
+let generate_pp_for_record type_name (labels : Typedtree.label_declaration list) : fun_def =
+  let param = "V" in
+  (* Generate: "{field1 = val1; field2 = val2; ...}" *)
+  let field_parts = List.mapi (fun i (ld : Typedtree.label_declaration) ->
+    let field_name = Ident.name ld.ld_id in
+    (* Access field: element(i+2, V) for tagged tuples, or maps:get for maps *)
+    let field_access = Expr_call {
+      module_ = Expr_lit (Lit_atom "erlang");
+      func = Expr_lit (Lit_atom "element");
+      args = [Expr_lit (Lit_int (i + 2)); Expr_var param];  (* +2: skip tag and 1-indexing *)
+    } in
+    let field_pp = generate_pp_expr_for_type ld.ld_type.ctyp_type field_access in
+    (field_name, field_pp)
+  ) labels in
+  (* Build: "{" ++ "name = " ++ pp_name ++ "; " ++ ... ++ "}" *)
+  let build_record_string parts =
+    let rec build first = function
+      | [] -> Expr_lit (Lit_string "}")
+      | [(name, pp_expr)] ->
+          let sep = if first then "" else "; " in
+          Expr_call {
+            module_ = Expr_lit (Lit_atom "erlang");
+            func = Expr_lit (Lit_atom "iolist_to_binary");
+            args = [Expr_list [
+              Expr_lit (Lit_string (sep ^ name ^ " = "));
+              pp_expr;
+              Expr_lit (Lit_string "}");
+            ]];
+          }
+      | (name, pp_expr) :: rest ->
+          let sep = if first then "" else "; " in
+          Expr_call {
+            module_ = Expr_lit (Lit_atom "erlang");
+            func = Expr_lit (Lit_atom "iolist_to_binary");
+            args = [Expr_list [
+              Expr_lit (Lit_string (sep ^ name ^ " = "));
+              pp_expr;
+              build false rest;
+            ]];
+          }
+    in
+    Expr_call {
+      module_ = Expr_lit (Lit_atom "erlang");
+      func = Expr_lit (Lit_atom "iolist_to_binary");
+      args = [Expr_list [Expr_lit (Lit_string "{"); build true parts]];
+    }
+  in
+  {
+    name = "pp_" ^ String.lowercase_ascii type_name;
+    arity = 1;
+    params = [param];
+    body = build_record_string field_parts;
+    loc = no_loc;
+  }
+
+(** Generate a pp function for a variant type *)
+let generate_pp_for_variant type_name (constrs : Typedtree.constructor_declaration list) : fun_def =
+  let param = "V" in
+  (* Generate case expression matching each constructor *)
+  let clauses = List.map (fun (cd : Typedtree.constructor_declaration) ->
+    let cstr_name = Ident.name cd.cd_id in
+    let cstr_atom = String.lowercase_ascii cstr_name in
+    match cd.cd_args with
+    | Cstr_tuple [] ->
+        (* Nullary constructor: atom *)
+        let pat = Pat_lit (Lit_atom cstr_atom) in
+        let body = Expr_lit (Lit_string cstr_name) in
+        (pat, None, body)
+    | Cstr_tuple arg_types ->
+        (* Constructor with args: {atom, arg1, arg2, ...} *)
+        let n_args = List.length arg_types in
+        let arg_vars = List.mapi (fun i _ -> Printf.sprintf "Arg_%d" i) arg_types in
+        let pat = Pat_tuple (Pat_lit (Lit_atom cstr_atom) :: List.map (fun v -> Pat_var v) arg_vars) in
+        (* Format: "Cstr_name (arg1, arg2, ...)" or "Cstr_name arg" for single arg *)
+        let arg_pps = List.map2 (fun var ct ->
+          generate_pp_expr_for_type ct.Typedtree.ctyp_type (Expr_var var)
+        ) arg_vars arg_types in
+        let body = if n_args = 1 then
+          Expr_call {
+            module_ = Expr_lit (Lit_atom "erlang");
+            func = Expr_lit (Lit_atom "iolist_to_binary");
+            args = [Expr_list [
+              Expr_lit (Lit_string (cstr_name ^ " "));
+              List.hd arg_pps;
+            ]];
+          }
+        else
+          (* Multiple args: format as tuple *)
+          let args_str = List.fold_left (fun acc pp ->
+            match acc with
+            | None -> Some pp
+            | Some prev ->
+                Some (Expr_call {
+                  module_ = Expr_lit (Lit_atom "erlang");
+                  func = Expr_lit (Lit_atom "iolist_to_binary");
+                  args = [Expr_list [prev; Expr_lit (Lit_string ", "); pp]];
+                })
+          ) None arg_pps in
+          Expr_call {
+            module_ = Expr_lit (Lit_atom "erlang");
+            func = Expr_lit (Lit_atom "iolist_to_binary");
+            args = [Expr_list [
+              Expr_lit (Lit_string (cstr_name ^ " ("));
+              (match args_str with Some e -> e | None -> Expr_lit (Lit_string ""));
+              Expr_lit (Lit_string ")");
+            ]];
+          }
+        in
+        (pat, None, body)
+    | Cstr_record _ ->
+        (* Inline record constructor - use fallback *)
+        let pat = Pat_var "_" in
+        let body = generate_inspect_fallback (Expr_var param) in
+        (pat, None, body)
+  ) constrs in
+  {
+    name = "pp_" ^ String.lowercase_ascii type_name;
+    arity = 1;
+    params = [param];
+    body = Expr_case { scrutinee = Expr_var param; clauses };
+    loc = no_loc;
+  }
+
+(** Generate pp functions for a type declaration *)
+let generate_pp_for_type (td : Typedtree.type_declaration) : fun_def option =
+  let type_name = Ident.name td.typ_id in
+  (* Skip types with type parameters for now - they need special handling *)
+  if td.typ_params <> [] then None
+  else match td.typ_kind with
+  | Ttype_record labels ->
+      Some (generate_pp_for_record type_name labels)
+  | Ttype_variant constrs ->
+      Some (generate_pp_for_variant type_name constrs)
+  | Ttype_abstract ->
+      (* Abstract types - can't generate pp *)
+      None
+  | Ttype_open ->
+      (* Open types - can't generate pp *)
+      None
+
+(** Count the number of format arguments expected by a format string *)
+let count_format_args fmt =
+  let count = ref 0 in
+  let i = ref 0 in
+  while !i < String.length fmt do
+    if fmt.[!i] = '%' && !i + 1 < String.length fmt then begin
+      let next = fmt.[!i + 1] in
+      match next with
+      | '%' -> i := !i + 2  (* %% is an escaped %, not an arg *)
+      | '.' ->
+          (* Handle precision like %.2f - skip digits, then count *)
+          let j = ref (!i + 2) in
+          while !j < String.length fmt && fmt.[!j] >= '0' && fmt.[!j] <= '9' do
+            incr j
+          done;
+          if !j < String.length fmt then begin
+            incr count;
+            i := !j + 1
+          end else
+            incr i
+      | _ -> incr count; i := !i + 2
+    end else
+      incr i
+  done;
+  !count
 
 (** Convert OCaml format specifiers to Erlang format codes *)
 let convert_format_string fmt =
@@ -183,21 +528,46 @@ let convert_printf_sprintf format_expr value_args =
   match extract_format_string format_expr with
   | Some fmt_str ->
       let erlang_fmt = convert_format_string fmt_str in
-      (* Build: lists:flatten(io_lib:format(fmt, [arg1, arg2, ...])) *)
-      let format_call = Expr_call {
-        module_ = Expr_lit (Lit_atom "io_lib");
-        func = Expr_lit (Lit_atom "format");
-        args = [
-          Expr_lit (Lit_string erlang_fmt);
-          Expr_list value_args;
-        ];
-      } in
-      (* Flatten the result to get a proper string *)
-      Expr_call {
-        module_ = Expr_lit (Lit_atom "lists");
-        func = Expr_lit (Lit_atom "flatten");
-        args = [format_call];
-      }
+      let expected_args = count_format_args fmt_str in
+      let provided_args = List.length value_args in
+      if provided_args >= expected_args then
+        (* Full application: all args provided *)
+        let format_call = Expr_call {
+          module_ = Expr_lit (Lit_atom "io_lib");
+          func = Expr_lit (Lit_atom "format");
+          args = [
+            Expr_lit (Lit_string erlang_fmt);
+            Expr_list value_args;
+          ];
+        } in
+        Expr_call {
+          module_ = Expr_lit (Lit_atom "lists");
+          func = Expr_lit (Lit_atom "flatten");
+          args = [format_call];
+        }
+      else
+        (* Partial application: return a lambda that collects remaining args *)
+        let missing = expected_args - provided_args in
+        let param_names = List.init missing (fun i -> fresh_var (Printf.sprintf "Arg%d" (i + 1))) in
+        let param_exprs = List.map (fun v -> Expr_var v) param_names in
+        let all_args = value_args @ param_exprs in
+        let format_call = Expr_call {
+          module_ = Expr_lit (Lit_atom "io_lib");
+          func = Expr_lit (Lit_atom "format");
+          args = [
+            Expr_lit (Lit_string erlang_fmt);
+            Expr_list all_args;
+          ];
+        } in
+        let body = Expr_call {
+          module_ = Expr_lit (Lit_atom "lists");
+          func = Expr_lit (Lit_atom "flatten");
+          args = [format_call];
+        } in
+        (* Wrap in nested lambdas for currying *)
+        List.fold_right (fun param acc ->
+          Expr_fun { params = [param]; body = acc }
+        ) param_names body
   | None ->
       (* Fallback: can't extract format string, return error *)
       failwith "Printf: could not extract format string"
@@ -370,11 +740,52 @@ let is_array_path path =
   | Path.Pdot (Path.Pdot (_, "Array"), _) -> true
   | _ -> false
 
+(** Check if a path refers to Inspect module *)
+let is_inspect_path path =
+  match path with
+  | Path.Pdot (Path.Pident mod_id, _) -> Ident.name mod_id = "Inspect"
+  | Path.Pdot (Path.Pdot (_, "Inspect"), _) -> true
+  | _ -> false
+
+(** Check if a path refers to any Macro module (for macro syntax).
+    Matches both top-level Macro and nested Macro modules. *)
+let rec is_macro_path path =
+  match path with
+  | Path.Pdot (Path.Pident mod_id, _) -> Ident.name mod_id = "Macro"
+  | Path.Pdot (Path.Pdot (_, "Macro"), _) -> true
+  | Path.Pdot (parent, "quote") -> is_macro_parent parent
+  | Path.Pdot (parent, "to_string") -> is_macro_parent parent
+  | Path.Pdot (parent, "unquote") -> is_macro_parent parent
+  | Path.Pdot (parent, "defmacro") -> is_macro_parent parent
+  | _ -> false
+
+(** Check if a path ends with Macro *)
+and is_macro_parent path =
+  match path with
+  | Path.Pident id -> Ident.name id = "Macro"
+  | Path.Pdot (_, "Macro") -> true
+  | _ -> false
+
 (** Get function name from path *)
 let get_path_func_name path =
   match path with
   | Path.Pdot (_, name) -> Some name
   | _ -> None
+
+(** Check if a value binding has the [@expose] attribute.
+    This is used to detect unhygienic variable bindings in macros.
+    The attribute can be on the pattern (let x [@expose] = ...) or
+    on the value binding itself. *)
+let has_expose_attribute (vb : Typedtree.value_binding) : bool =
+  (* Check pattern attributes - this is where `let x [@expose] = ...` puts it *)
+  let pat_has_expose = List.exists (fun (attr : Parsetree.attribute) ->
+    attr.attr_name.txt = "expose"
+  ) vb.vb_pat.pat_attributes in
+  (* Also check value binding attributes (for completeness) *)
+  let vb_has_expose = List.exists (fun (attr : Parsetree.attribute) ->
+    attr.attr_name.txt = "expose"
+  ) vb.vb_attributes in
+  pat_has_expose || vb_has_expose
 
 (** Extract raw format string from a typed constant expression.
     OCaml's Printf format strings are represented with CamlinternalFormatBasics.Format
@@ -415,12 +826,11 @@ let rec extract_typed_format_string (expr : Typedtree.expression) =
 let rec convert_expr (expr : Typedtree.expression) : Beam_ir.expr =
   match expr.exp_desc with
   | Texp_ident (Path.Pident id, _, _) ->
-      let name = Ident.name id in
       (* Check if this is a top-level function being used as a value *)
-      (match lookup_top_level_function name with
-       | Some arity ->
+      (match lookup_top_level_function id with
+       | Some (func_name, arity) ->
            (* Function reference *)
-           Expr_fun_ref { func_name = name; arity }
+           Expr_fun_ref { func_name; arity }
        | None ->
            (* Variable reference *)
            Expr_var (convert_ident id))
@@ -476,13 +886,33 @@ let rec convert_expr (expr : Typedtree.expression) : Beam_ir.expr =
       convert_record fields extended_expression
 
   | Texp_field (expr, _, lbl) ->
-      (* Record field access becomes element/2 call *)
-      let idx = lbl.lbl_pos + 1 in  (* Erlang tuples are 1-indexed *)
-      Expr_call {
-        module_ = Expr_lit (Lit_atom "erlang");
-        func = Expr_lit (Lit_atom "element");
-        args = [Expr_lit (Lit_int (idx + 1)); convert_expr expr];  (* +1 for tag *)
-      }
+      (* Check if this is accessing a field of a map-backed type:
+         1. 'type t' in elixir_struct mode
+         2. Any type marked with [@@elixir] *)
+      let record_type_name = match Types.get_desc lbl.lbl_res with
+        | Types.Tconstr (path, _, _) ->
+            String.lowercase_ascii (Filename.basename (Path.name path))
+        | _ -> ""
+      in
+      let is_map_type =
+        (!elixir_struct_mode && record_type_name = "t") ||
+        is_elixir_type record_type_name
+      in
+      if is_map_type then
+        (* Map-backed type - use maps:get *)
+        Expr_call {
+          module_ = Expr_lit (Lit_atom "maps");
+          func = Expr_lit (Lit_atom "get");
+          args = [Expr_lit (Lit_atom lbl.lbl_name); convert_expr expr];
+        }
+      else
+        (* Normal records are tuples - use element/2 *)
+        let idx = lbl.lbl_pos + 1 in  (* Erlang tuples are 1-indexed *)
+        Expr_call {
+          module_ = Expr_lit (Lit_atom "erlang");
+          func = Expr_lit (Lit_atom "element");
+          args = [Expr_lit (Lit_int (idx + 1)); convert_expr expr];  (* +1 for tag *)
+        }
 
   | Texp_ifthenelse (cond, then_, else_opt) ->
       let else_expr = match else_opt with
@@ -498,8 +928,10 @@ let rec convert_expr (expr : Typedtree.expression) : Beam_ir.expr =
   | Texp_sequence (e1, e2) ->
       Expr_seq (convert_expr e1, convert_expr e2)
 
-  | Texp_try (body, _comp_cases, val_cases) ->
-      convert_try body val_cases
+  | Texp_try (body, exn_cases, _val_cases) ->
+      (* In OCaml 5.4, Texp_try has: body, exception_handlers, value_handlers
+         We use exn_cases for exception handling *)
+      convert_try body exn_cases
 
   | Texp_array (_, elements) ->
       (* Arrays become Erlang tuples - use erlang:list_to_tuple for construction *)
@@ -585,9 +1017,8 @@ let rec convert_expr (expr : Typedtree.expression) : Beam_ir.expr =
       let convert_path_to_expr (path : Path.t) : Beam_ir.expr =
         match path with
         | Path.Pident id ->
-            let name = Ident.name id in
-            (match lookup_top_level_function name with
-             | Some arity -> Expr_fun_ref { func_name = name; arity }
+            (match lookup_top_level_function id with
+             | Some (func_name, arity) -> Expr_fun_ref { func_name; arity }
              | None -> Expr_var (convert_ident id))
         | _ -> Expr_var (path_to_string path)
       in
@@ -628,7 +1059,15 @@ and convert_let rec_flag bindings body =
   | Asttypes.Nonrecursive ->
       List.fold_right (fun vb acc ->
         let pat = vb.Typedtree.vb_pat in
-        if is_simple_var_pattern pat then
+        (* Check if binding has [@expose] attribute for unhygienic binding *)
+        if has_expose_attribute vb && is_simple_var_pattern pat then
+          (* [@expose]: use Pat_inject for unhygienic variable binding *)
+          let var = pat_to_var pat in
+          Expr_case {
+            scrutinee = convert_expr vb.vb_expr;
+            clauses = [(Pat_inject var, None, acc)];
+          }
+        else if is_simple_var_pattern pat then
           (* Simple variable binding: use let directly *)
           let var = pat_to_var pat in
           Expr_let {
@@ -644,26 +1083,37 @@ and convert_let rec_flag bindings body =
           }
       ) bindings (convert_expr body)
   | Asttypes.Recursive ->
+      (* Extract Ident from pattern for letrec functions *)
+      let pat_to_ident (pat : Typedtree.pattern) =
+        match pat.pat_desc with
+        | Typedtree.Tpat_var (id, _, _) -> Some id
+        | _ -> None
+      in
       (* First pass: collect all recursive function names and arities *)
       let rec_info = List.map (fun vb ->
+        let id_opt = pat_to_ident vb.Typedtree.vb_pat in
         let name = String.lowercase_ascii (pat_to_var vb.Typedtree.vb_pat) in
         let arity = arity_of_type vb.Typedtree.vb_expr.exp_type in
-        (vb, name, arity)
+        (vb, id_opt, name, arity)
       ) bindings in
       (* Register letrec functions so they can be referenced in function bodies AND in body *)
-      List.iter (fun (_, name, arity) ->
-        register_top_level_function name arity
+      List.iter (fun (_, id_opt, _, arity) ->
+        match id_opt with
+        | Some id -> register_top_level_function id arity
+        | None -> ()
       ) rec_info;
       (* Extract function bodies with the letrec names in scope *)
-      let rec_bindings = List.map (fun (vb, name, _) ->
+      let rec_bindings = List.map (fun (vb, _, name, _) ->
         let params, func_body = extract_function vb.Typedtree.vb_expr in
         (name, params, func_body)
       ) rec_info in
       (* Convert body with letrec names still in scope *)
       let converted_body = convert_expr body in
       (* Remove the temporary registrations after converting everything *)
-      List.iter (fun (_, name, _) ->
-        Hashtbl.remove top_level_functions name
+      List.iter (fun (_, id_opt, _, _) ->
+        match id_opt with
+        | Some id -> Hashtbl.remove top_level_functions (Ident.unique_name id)
+        | None -> ()
       ) rec_info;
       Expr_letrec {
         bindings = rec_bindings;
@@ -1008,6 +1458,39 @@ and convert_apply func args =
            let func_expr = convert_expr func in
            let arg_exprs = List.map convert_expr typed_args in
            Expr_apply (func_expr, arg_exprs))
+  | Texp_ident (path, _, _) when is_macro_path path ->
+      (* Handle Macro module for compile-time metaprogramming:
+         - Macro.quote expr      -> Expr_quote (convert expr)
+         - Macro.unquote name    -> Expr_unquote "name"
+         - Macro.to_string name  -> Expr_stringify "name"
+      *)
+      let func_name = match get_path_func_name path with Some n -> n | None -> "" in
+      let typed_args = List.filter_map (fun (_, arg) ->
+        match arg with
+        | Typedtree.Arg e -> Some e
+        | Typedtree.Omitted _ -> None
+      ) args in
+      (match func_name, typed_args with
+       | "quote", [inner_expr] ->
+           (* Macro.quote expr -> wrap the converted expr in Expr_quote *)
+           Expr_quote (convert_expr inner_expr)
+       | "unquote", [name_expr] ->
+           (* Macro.unquote expr -> Expr_unquote "expr" (splices macro parameter AST) *)
+           (match name_expr.exp_desc with
+            | Texp_constant (Const_string (name, _, _)) -> Expr_unquote name
+            | Texp_ident (Path.Pident id, _, _) -> Expr_unquote (Ident.name id)
+            | _ -> failwith "Macro.unquote requires a macro parameter or string literal")
+       | "to_string", [name_expr] ->
+           (* Macro.to_string expr -> Expr_stringify "expr" *)
+           (match name_expr.exp_desc with
+            | Texp_constant (Const_string (name, _, _)) -> Expr_stringify name
+            | Texp_ident (Path.Pident id, _, _) -> Expr_stringify (Ident.name id)
+            | _ -> failwith "Macro.to_string requires a macro parameter or string literal")
+       | _ ->
+           (* Unknown Macro function - use default handling *)
+           let func_expr = convert_expr func in
+           let arg_exprs = List.map convert_expr typed_args in
+           Expr_apply (func_expr, arg_exprs))
   | Texp_ident (path, _, _) when is_printf_path path ->
       let func_name = match get_path_func_name path with Some n -> n | None -> "" in
       let typed_args = List.filter_map (fun (_, arg) ->
@@ -1022,31 +1505,74 @@ and convert_apply func args =
             | Some fmt_str ->
                 let erlang_fmt = convert_format_string fmt_str in
                 let value_args = List.map convert_expr value_typed_args in
+                let expected_args = count_format_args fmt_str in
+                let provided_args = List.length value_args in
                 if func_name = "sprintf" then
-                  (* sprintf: lists:flatten(io_lib:format(fmt, [args])) *)
-                  let format_call = Expr_call {
-                    module_ = Expr_lit (Lit_atom "io_lib");
-                    func = Expr_lit (Lit_atom "format");
-                    args = [
-                      Expr_lit (Lit_string erlang_fmt);
-                      Expr_list value_args;
-                    ];
-                  } in
-                  Expr_call {
-                    module_ = Expr_lit (Lit_atom "lists");
-                    func = Expr_lit (Lit_atom "flatten");
-                    args = [format_call];
-                  }
+                  if provided_args >= expected_args then
+                    (* sprintf: full application - lists:flatten(io_lib:format(fmt, [args])) *)
+                    let format_call = Expr_call {
+                      module_ = Expr_lit (Lit_atom "io_lib");
+                      func = Expr_lit (Lit_atom "format");
+                      args = [
+                        Expr_lit (Lit_string erlang_fmt);
+                        Expr_list value_args;
+                      ];
+                    } in
+                    Expr_call {
+                      module_ = Expr_lit (Lit_atom "lists");
+                      func = Expr_lit (Lit_atom "flatten");
+                      args = [format_call];
+                    }
+                  else
+                    (* sprintf: partial application - return a lambda *)
+                    let missing = expected_args - provided_args in
+                    let param_names = List.init missing (fun i -> fresh_var (Printf.sprintf "Arg%d" (i + 1))) in
+                    let param_exprs = List.map (fun v -> Expr_var v) param_names in
+                    let all_args = value_args @ param_exprs in
+                    let format_call = Expr_call {
+                      module_ = Expr_lit (Lit_atom "io_lib");
+                      func = Expr_lit (Lit_atom "format");
+                      args = [
+                        Expr_lit (Lit_string erlang_fmt);
+                        Expr_list all_args;
+                      ];
+                    } in
+                    let body = Expr_call {
+                      module_ = Expr_lit (Lit_atom "lists");
+                      func = Expr_lit (Lit_atom "flatten");
+                      args = [format_call];
+                    } in
+                    List.fold_right (fun param acc ->
+                      Expr_fun { params = [param]; body = acc }
+                    ) param_names body
                 else
-                  (* printf: io:format(fmt, [args]) *)
-                  Expr_call {
-                    module_ = Expr_lit (Lit_atom "io");
-                    func = Expr_lit (Lit_atom "format");
-                    args = [
-                      Expr_lit (Lit_string erlang_fmt);
-                      Expr_list value_args;
-                    ];
-                  }
+                  if provided_args >= expected_args then
+                    (* printf: full application - io:format(fmt, [args]) *)
+                    Expr_call {
+                      module_ = Expr_lit (Lit_atom "io");
+                      func = Expr_lit (Lit_atom "format");
+                      args = [
+                        Expr_lit (Lit_string erlang_fmt);
+                        Expr_list value_args;
+                      ];
+                    }
+                  else
+                    (* printf: partial application - return a lambda *)
+                    let missing = expected_args - provided_args in
+                    let param_names = List.init missing (fun i -> fresh_var (Printf.sprintf "Arg%d" (i + 1))) in
+                    let param_exprs = List.map (fun v -> Expr_var v) param_names in
+                    let all_args = value_args @ param_exprs in
+                    let body = Expr_call {
+                      module_ = Expr_lit (Lit_atom "io");
+                      func = Expr_lit (Lit_atom "format");
+                      args = [
+                        Expr_lit (Lit_string erlang_fmt);
+                        Expr_list all_args;
+                      ];
+                    } in
+                    List.fold_right (fun param acc ->
+                      Expr_fun { params = [param]; body = acc }
+                    ) param_names body
             | None ->
                 (* Couldn't extract format string, fall through to default *)
                 let func_expr = convert_expr func in
@@ -1061,6 +1587,28 @@ and convert_apply func args =
              | Typedtree.Omitted _ -> None
            ) args in
            Expr_apply (func_expr, arg_exprs))
+  | Texp_ident (path, _, _) when is_inspect_path path ->
+      (* Handle Inspect module - special handling for pp, others go to Merlot.Inspect *)
+      let func_name = match get_path_func_name path with Some n -> n | None -> "" in
+      let typed_args = List.filter_map (fun (_, arg) ->
+        match arg with
+        | Typedtree.Arg e -> Some e
+        | Typedtree.Omitted _ -> None
+      ) args in
+      (match func_name, typed_args with
+       | "pp", [value_expr] ->
+           (* Inspect.pp value -> generate_pp_expr_for_type based on value's type *)
+           let value_type = value_expr.exp_type in
+           let converted_value = convert_expr value_expr in
+           generate_pp_expr_for_type value_type converted_value
+       | _ ->
+           (* Other Inspect functions -> call Merlot.Inspect module *)
+           let arg_exprs = List.map convert_expr typed_args in
+           Expr_call {
+             module_ = Expr_lit (Lit_atom "Merlot.Inspect");
+             func = Expr_lit (Lit_atom func_name);
+             args = arg_exprs;
+           })
   | _ ->
       (* Default handling for non-Printf calls *)
       let func_expr = convert_expr func in
@@ -1085,17 +1633,37 @@ and convert_apply func args =
            (* spawn expects a 0-arity fun, but OCaml functions take unit *)
            convert_spawn args
        | Some ("merlot", "pipe_first") ->
-           (* Data-first pipe: x |. f a b  =>  f x a b *)
-           (match arg_exprs with
-            | [x; f] ->
-                (match f with
-                 | Expr_apply (func, args) -> Expr_apply (func, x :: args)
-                 | Expr_local_call { func_name; arity = _; args } ->
-                     (* Arity is determined by actual args, not the partial application arity *)
-                     Expr_local_call { func_name; arity = List.length args + 1; args = x :: args }
-                 | Expr_call { module_; func; args } ->
-                     Expr_call { module_; func; args = x :: args }
-                 | _ -> Expr_apply (f, [x]))
+           (* Data-first pipe: x |. f a b  =>  f x a b
+              Need to look at original typed args to detect externals *)
+           let typed_args_list = List.filter_map (fun (_, arg) ->
+             match arg with
+             | Typedtree.Arg e -> Some e
+             | Typedtree.Omitted _ -> None
+           ) args in
+           (match typed_args_list, arg_exprs with
+            | [_; f_typed], [x; f] ->
+                (* Check if f is an external function *)
+                let external_info = match f_typed.exp_desc with
+                  | Texp_ident (Path.Pident id, _, _) -> lookup_external id
+                  | _ -> None
+                in
+                (match external_info with
+                 | Some (mod_name, func_name) ->
+                     (* f is an external - generate proper Expr_call *)
+                     Expr_call {
+                       module_ = Expr_lit (Lit_atom mod_name);
+                       func = Expr_lit (Lit_atom func_name);
+                       args = [x];
+                     }
+                 | None ->
+                     (* Not an external - handle normally *)
+                     (match f with
+                      | Expr_apply (func, args) -> Expr_apply (func, x :: args)
+                      | Expr_local_call { func_name; arity = _; args } ->
+                          Expr_local_call { func_name; arity = List.length args + 1; args = x :: args }
+                      | Expr_call { module_; func; args } ->
+                          Expr_call { module_; func; args = x :: args }
+                      | _ -> Expr_apply (f, [x])))
             | _ -> failwith "pipe_first expects exactly 2 arguments")
        | Some (mod_name, func_name) ->
            (* Regular external call - filter out unit arguments *)
@@ -1227,15 +1795,32 @@ and convert_non_primitive_apply func arg_exprs =
         args = arg_exprs;
       }
   | Texp_ident (Path.Pdot (Path.Pdot (Path.Pident parent_mod, sub_mod), func_name), _, _) ->
-      (* Nested module path: Parent.Sub.func -> call sub:func *)
-      (* For Merlot_stdlib.Actor.func -> call actor:func *)
-      let _ = parent_mod in  (* Ignore parent, use submodule as erlang module *)
-      let mod_name = String.lowercase_ascii sub_mod in
-      Expr_call {
-        module_ = Expr_lit (Lit_atom mod_name);
-        func = Expr_lit (Lit_atom func_name);
-        args = arg_exprs;
-      }
+      (* Nested module path: Parent.Sub.func *)
+      let parent_name = Ident.name parent_mod in
+      (* Check if this is a Merlot_stdlib submodule with OCaml implementations *)
+      if parent_name = "Merlot_stdlib" && sub_mod = "List" then
+        convert_merlot_list_call func_name arg_exprs
+      else if parent_name = "Merlot_stdlib" && sub_mod = "Option" then
+        convert_merlot_option_call func_name arg_exprs
+      else if parent_name = "Merlot_stdlib" && sub_mod = "Result" then
+        convert_merlot_result_call func_name arg_exprs
+      else
+        (* Determine if this is a Merlot stdlib module with OCaml implementation *)
+        let merlot_prefixed_modules = [
+          "Actor"; "Enum"; "Inspect"; "Keyword"; "Map"; "Option";
+          "Process"; "Result"; "Supervisor"
+        ] in
+        let mod_name =
+          if parent_name = "Merlot_stdlib" && List.mem sub_mod merlot_prefixed_modules then
+            "Merlot." ^ sub_mod  (* OCaml implementation -> Merlot.Module *)
+          else
+            String.lowercase_ascii sub_mod  (* External binding -> erlang module *)
+        in
+        Expr_call {
+          module_ = Expr_lit (Lit_atom mod_name);
+          func = Expr_lit (Lit_atom func_name);
+          args = arg_exprs;
+        }
   | _ ->
       Expr_apply (convert_expr func, arg_exprs)
 
@@ -1245,7 +1830,7 @@ and convert_stdlib_call op args =
   | "+", [a; b] -> Expr_binary (Op_add, a, b)
   | "-", [a; b] -> Expr_binary (Op_sub, a, b)
   | "*", [a; b] -> Expr_binary (Op_mul, a, b)
-  | "/", [a; b] -> Expr_binary (Op_div, a, b)
+  | "/", [a; b] -> Expr_binary (Op_idiv, a, b)  (* Integer division in OCaml *)
   | "mod", [a; b] -> Expr_binary (Op_mod, a, b)
   | "=", [a; b] -> Expr_binary (Op_eq, a, b)
   | "<>", [a; b] -> Expr_binary (Op_ne, a, b)
@@ -1299,6 +1884,37 @@ and convert_stdlib_call op args =
         func = Expr_lit (Lit_atom "abs");
         args = [a];
       }
+  (* Exception handling *)
+  | "raise", [exn] ->
+      (* raise exn => erlang:raise(error, exn, [])
+         Use 'error' class for OCaml exceptions *)
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "raise");
+        args = [Expr_lit (Lit_atom "error"); exn; Expr_list []];
+      }
+  | "failwith", [msg] ->
+      (* failwith msg => erlang:raise(error, {failure, msg}, []) *)
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "raise");
+        args = [
+          Expr_lit (Lit_atom "error");
+          Expr_tuple [Expr_lit (Lit_atom "failure"); msg];
+          Expr_list [];
+        ];
+      }
+  | "invalid_arg", [msg] ->
+      (* invalid_arg msg => erlang:raise(error, {invalid_argument, msg}, []) *)
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "raise");
+        args = [
+          Expr_lit (Lit_atom "error");
+          Expr_tuple [Expr_lit (Lit_atom "invalid_argument"); msg];
+          Expr_list [];
+        ];
+      }
   | _ ->
       (* Unknown stdlib function - call erlang module *)
       Expr_call {
@@ -1307,6 +1923,142 @@ and convert_stdlib_call op args =
         args;
       }
 
+(** Convert Merlot_stdlib.List function calls to inline implementations *)
+and convert_merlot_list_call func_name args =
+  match func_name, args with
+  | "nth", [lst; n] ->
+      (* List.nth lst n -> lists:nth(n + 1, lst)  (0-indexed to 1-indexed) *)
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "nth");
+        args = [Expr_binary (Op_add, n, Expr_lit (Lit_int 1)); lst];
+      }
+  | "length", [lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "length");
+        args = [lst];
+      }
+  | "hd", [lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "hd");
+        args = [lst];
+      }
+  | "tl", [lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "erlang");
+        func = Expr_lit (Lit_atom "tl");
+        args = [lst];
+      }
+  | "rev", [lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "reverse");
+        args = [lst];
+      }
+  | "append", [a; b] ->
+      Expr_binary (Op_append, a, b)
+  | "concat", [lst] | "flatten", [lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "append");
+        args = [lst];
+      }
+  | "map", [f; lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "map");
+        args = [f; lst];
+      }
+  | "filter", [pred; lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "filter");
+        args = [pred; lst];
+      }
+  | "mem", [elem; lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "member");
+        args = [elem; lst];
+      }
+  | "exists", [pred; lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "any");
+        args = [pred; lst];
+      }
+  | "for_all", [pred; lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "all");
+        args = [pred; lst];
+      }
+  | "combine", [a; b] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "zip");
+        args = [a; b];
+      }
+  | "split", [lst] ->
+      Expr_call {
+        module_ = Expr_lit (Lit_atom "lists");
+        func = Expr_lit (Lit_atom "unzip");
+        args = [lst];
+      }
+  | _ ->
+      (* Unknown List function - generate call that will fail at runtime with clear error *)
+      failwith (Printf.sprintf "Merlot_stdlib.List.%s is not yet implemented" func_name)
+
+(** Convert Merlot_stdlib.Option function calls *)
+and convert_merlot_option_call func_name args =
+  match func_name, args with
+  | "some", [v] -> Expr_tuple [Expr_lit (Lit_atom "some"); v]
+  | "none", [] -> Expr_lit (Lit_atom "none")
+  | "is_some", [opt] ->
+      Expr_case {
+        scrutinee = opt;
+        clauses = [
+          (Pat_tuple [Pat_lit (Lit_atom "some"); Pat_var "_"], None, Expr_lit (Lit_atom "true"));
+          (Pat_var "_", None, Expr_lit (Lit_atom "false"));
+        ];
+      }
+  | "is_none", [opt] ->
+      Expr_case {
+        scrutinee = opt;
+        clauses = [
+          (Pat_lit (Lit_atom "none"), None, Expr_lit (Lit_atom "true"));
+          (Pat_var "_", None, Expr_lit (Lit_atom "false"));
+        ];
+      }
+  | _ ->
+      failwith (Printf.sprintf "Merlot_stdlib.Option.%s is not yet implemented" func_name)
+
+(** Convert Merlot_stdlib.Result function calls *)
+and convert_merlot_result_call func_name args =
+  match func_name, args with
+  | "ok", [v] -> Expr_tuple [Expr_lit (Lit_atom "ok"); v]
+  | "error", [e] -> Expr_tuple [Expr_lit (Lit_atom "error"); e]
+  | "is_ok", [res] ->
+      Expr_case {
+        scrutinee = res;
+        clauses = [
+          (Pat_tuple [Pat_lit (Lit_atom "ok"); Pat_var "_"], None, Expr_lit (Lit_atom "true"));
+          (Pat_var "_", None, Expr_lit (Lit_atom "false"));
+        ];
+      }
+  | "is_error", [res] ->
+      Expr_case {
+        scrutinee = res;
+        clauses = [
+          (Pat_tuple [Pat_lit (Lit_atom "error"); Pat_var "_"], None, Expr_lit (Lit_atom "true"));
+          (Pat_var "_", None, Expr_lit (Lit_atom "false"));
+        ];
+      }
+  | _ ->
+      failwith (Printf.sprintf "Merlot_stdlib.Result.%s is not yet implemented" func_name)
+
 (** Convert builtin or regular function application *)
 and convert_builtin_or_apply id args =
   let name = Ident.name id in
@@ -1314,22 +2066,22 @@ and convert_builtin_or_apply id args =
   | "+", [a; b] -> Expr_binary (Op_add, a, b)
   | "-", [a; b] -> Expr_binary (Op_sub, a, b)
   | "*", [a; b] -> Expr_binary (Op_mul, a, b)
-  | "/", [a; b] -> Expr_binary (Op_div, a, b)
+  | "/", [a; b] -> Expr_binary (Op_idiv, a, b)  (* Integer division *)
   | _ ->
       (* Check if it's a known top-level function *)
-      (match lookup_top_level_function name with
-       | Some arity ->
+      (match lookup_top_level_function id with
+       | Some (func_name, arity) ->
            let num_args = List.length args in
            if num_args = arity then
              (* Full application - direct local call *)
-             Expr_local_call { func_name = name; arity; args }
+             Expr_local_call { func_name; arity; args }
            else if num_args < arity then
              (* Partial application - wrap remaining args in lambdas *)
              let missing = arity - num_args in
              let extra_vars = List.init missing (fun i -> fresh_var (Printf.sprintf "Arg%d" (i + 1))) in
              let extra_args = List.map (fun v -> Expr_var v) extra_vars in
              let full_call = Expr_local_call {
-               func_name = name;
+               func_name;
                arity;
                args = args @ extra_args
              } in
@@ -1339,7 +2091,7 @@ and convert_builtin_or_apply id args =
              ) extra_vars full_call
            else
              (* More args than arity - shouldn't happen with well-typed code *)
-             Expr_local_call { func_name = name; arity; args }
+             Expr_local_call { func_name; arity; args }
        | None ->
            (* Local variable (function parameter) - use apply with variable *)
            Expr_apply (Expr_var (convert_ident id), args))
@@ -1411,38 +2163,97 @@ and convert_record fields extended_expression =
         in
         String.lowercase_ascii (Filename.basename type_name)
   in
-  (* Convert base expression if this is a record update *)
-  let base_expr = Option.map convert_expr extended_expression in
-  (* Convert each field - either from override or from base record *)
-  let field_exprs = Array.to_list fields |> List.map (fun (lbl, def) ->
-    match def with
-    | Typedtree.Kept _ ->
-        (* Field kept from base record - use element/2 to extract *)
-        let idx = lbl.lbl_pos + 2 in  (* +1 for 1-indexing, +1 for tag *)
-        (match base_expr with
-         | Some base ->
-             Expr_call {
-               module_ = Expr_lit (Lit_atom "erlang");
-               func = Expr_lit (Lit_atom "element");
-               args = [Expr_lit (Lit_int idx); base];
-             }
-         | None -> failwith "Kept field without base expression")
-    | Typedtree.Overridden (_, e) -> convert_expr e
-  ) in
-  (* Records become tuples with a tag *)
-  Expr_tuple (Expr_lit (Lit_atom record_name) :: field_exprs)
+  (* Check if this should be a map:
+     1. 'type t' in elixir_struct mode (produces Elixir struct with __struct__)
+     2. Any type marked with [@@elixir] (produces plain map for imported structs) *)
+  let is_elixir_struct = !elixir_struct_mode && record_name = "t" in
+  let is_elixir_import = is_elixir_type record_name in
+  if is_elixir_struct then
+    (* Elixir struct mode: type t becomes a map with __struct__ key *)
+    let full_module_name = "Elixir." ^ String.capitalize_ascii !current_module_name in
+    (* Convert base expression if this is a record update *)
+    let base_expr = Option.map convert_expr extended_expression in
+    (* Build field pairs for the map *)
+    let field_pairs = Array.to_list fields |> List.map (fun (lbl, def) ->
+      let key = Expr_lit (Lit_atom lbl.lbl_name) in
+      let value = match def with
+        | Typedtree.Kept _ ->
+            (* Field kept from base record - use maps:get to extract *)
+            (match base_expr with
+             | Some base ->
+                 Expr_call {
+                   module_ = Expr_lit (Lit_atom "maps");
+                   func = Expr_lit (Lit_atom "get");
+                   args = [key; base];
+                 }
+             | None -> failwith "Kept field without base expression")
+        | Typedtree.Overridden (_, e) -> convert_expr e
+      in
+      (key, value)
+    ) in
+    (* Add __struct__ key *)
+    let struct_pair = (Expr_lit (Lit_atom "__struct__"), Expr_lit (Lit_atom full_module_name)) in
+    Expr_map (struct_pair :: field_pairs)
+  else if is_elixir_import then
+    (* Elixir import: type marked with [@@elixir] becomes a plain map (no __struct__) *)
+    let base_expr = Option.map convert_expr extended_expression in
+    let field_pairs = Array.to_list fields |> List.map (fun (lbl, def) ->
+      let key = Expr_lit (Lit_atom lbl.lbl_name) in
+      let value = match def with
+        | Typedtree.Kept _ ->
+            (match base_expr with
+             | Some base ->
+                 Expr_call {
+                   module_ = Expr_lit (Lit_atom "maps");
+                   func = Expr_lit (Lit_atom "get");
+                   args = [key; base];
+                 }
+             | None -> failwith "Kept field without base expression")
+        | Typedtree.Overridden (_, e) -> convert_expr e
+      in
+      (key, value)
+    ) in
+    Expr_map field_pairs
+  else
+    (* Normal mode: records become tuples with a tag *)
+    let base_expr = Option.map convert_expr extended_expression in
+    let field_exprs = Array.to_list fields |> List.map (fun (lbl, def) ->
+      match def with
+      | Typedtree.Kept _ ->
+          (* Field kept from base record - use element/2 to extract *)
+          let idx = lbl.lbl_pos + 2 in  (* +1 for 1-indexing, +1 for tag *)
+          (match base_expr with
+           | Some base ->
+               Expr_call {
+                 module_ = Expr_lit (Lit_atom "erlang");
+                 func = Expr_lit (Lit_atom "element");
+                 args = [Expr_lit (Lit_int idx); base];
+               }
+           | None -> failwith "Kept field without base expression")
+      | Typedtree.Overridden (_, e) -> convert_expr e
+    ) in
+    Expr_tuple (Expr_lit (Lit_atom record_name) :: field_exprs)
 
-(** Convert try expression *)
-and convert_try body cases =
+(** Convert try expression
+    In OCaml 5.4, exception handlers are value cases where the pattern
+    describes the exception to catch. *)
+and convert_try body (cases : Typedtree.value Typedtree.case list) =
   let class_var = fresh_var "Class" in
   let reason_var = fresh_var "Reason" in
   let stack_var = fresh_var "Stack" in
 
   let catch_body = match cases with
-    | [] -> Expr_primop { name = "raise"; args = [Expr_var reason_var] }
+    | [] ->
+        (* No exception handlers - re-raise the exception *)
+        Expr_call {
+          module_ = Expr_lit (Lit_atom "erlang");
+          func = Expr_lit (Lit_atom "raise");
+          args = [Expr_var class_var; Expr_var reason_var; Expr_var stack_var];
+        }
     | _ ->
-        let clauses = List.map (fun c ->
-          let pat = convert_pattern c.Typedtree.c_lhs in
+        (* Convert exception handlers to case clauses *)
+        let clauses = List.map (fun (c : Typedtree.value Typedtree.case) ->
+          let pat = convert_pattern c.c_lhs in
           let guard = Option.map convert_expr c.c_guard in
           let body = convert_expr c.c_rhs in
           (pat, guard, body)
@@ -1506,7 +2317,37 @@ let convert_structure_item (item : Typedtree.structure_item) : Beam_ir.fun_def l
       (* Register external for later lookup during apply conversion *)
       register_external vd.val_id vd.val_prim;
       []
-  | Tstr_type _ -> []  (* Type declarations don't generate code *)
+  | Tstr_type (_, type_decls) ->
+      (* Type declarations generate pp_<typename> functions for pretty-printing *)
+      let pp_funcs = List.filter_map (fun (td : Typedtree.type_declaration) ->
+        let type_name = Ident.name td.typ_id in
+        (* Check for [@@elixir] or [@@elixir "Module.Name"] attribute *)
+        let elixir_attr = List.find_opt (fun (attr : Parsetree.attribute) ->
+          attr.attr_name.txt = "elixir"
+        ) td.typ_attributes in
+        (match elixir_attr with
+         | Some attr ->
+             (* Extract optional explicit module name from payload *)
+             let explicit_module = match attr.attr_payload with
+               | Parsetree.PStr [{pstr_desc = Pstr_eval ({pexp_desc = Pexp_constant {pconst_desc = Pconst_string (s, _, _); _}; _}, _); _}] ->
+                   Some s
+               | _ -> None
+             in
+             register_elixir_type type_name explicit_module
+         | None -> ());
+        (* In elixir_struct mode, also process 'type t' for __struct__ generation *)
+        if !elixir_struct_mode && type_name = "t" then
+          (match td.typ_kind with
+          | Ttype_record labels ->
+              let field_names = List.map (fun (ld : Typedtree.label_declaration) ->
+                Ident.name ld.ld_id
+              ) labels in
+              elixir_struct_record := Some { field_names }
+          | _ -> ());
+        (* Generate pp function for non-polymorphic types *)
+        generate_pp_for_type td
+      ) type_decls in
+      pp_funcs
   | Tstr_exception _ -> []  (* TODO: handle exceptions *)
   | Tstr_module _ -> []  (* TODO: handle submodules *)
   | Tstr_modtype _ -> []
@@ -1539,30 +2380,219 @@ let collect_top_level_functions (str : Typedtree.structure) =
         List.iter (fun vb ->
           match vb.Typedtree.vb_pat.pat_desc with
           | Tpat_var (id, _, _) ->
-              let name = Ident.name id in
               let arity = arity_of_type vb.Typedtree.vb_expr.exp_type in
               if arity > 0 then
-                register_top_level_function name arity
+                register_top_level_function id arity
           | _ -> ()
         ) bindings
     | _ -> ()
   ) str.str_items
+
+(** Check if a function name is a macro definition (starts with "macro_") *)
+let is_macro_definition name =
+  String.length name > 6 && String.sub name 0 6 = "macro_"
+
+(** Extract macro name from "macro_foo" -> "foo" *)
+let macro_name_of_function name =
+  String.sub name 6 (String.length name - 6)
+
+(** Check if an expression is a Macro.defmacro call and extract the lambda.
+    Returns Some (lambda_expr) if it matches, None otherwise. *)
+let extract_defmacro_lambda (expr : Typedtree.expression) : Typedtree.expression option =
+  match expr.exp_desc with
+  | Texp_apply (func, args) ->
+      (match func.exp_desc with
+       | Texp_ident (path, _, _) when is_macro_path path ->
+           (match get_path_func_name path with
+            | Some "defmacro" ->
+                (* Extract the lambda argument *)
+                (match args with
+                 | [(_, Typedtree.Arg lambda_expr)] -> Some lambda_expr
+                 | _ -> None)
+            | _ -> None)
+       | _ -> None)
+  | _ -> None
+
+(** Check if an expression is a Macro.defmacro call *)
+let is_defmacro_definition (expr : Typedtree.expression) : bool =
+  Option.is_some (extract_defmacro_lambda expr)
+
+(** Extract parameter names from a function expression *)
+let rec extract_param_names_from_expr (expr : Typedtree.expression) : string list =
+  match expr.exp_desc with
+  | Texp_function (params, Tfunction_body body_expr) ->
+      let param_names = List.filter_map (fun fp ->
+        match get_param_type fp with
+        | Some ty when is_unit_type ty -> None
+        | _ -> Some (Ident.name fp.fp_param)
+      ) params in
+      let more_params = extract_param_names_from_expr body_expr in
+      param_names @ more_params
+  | Texp_function (params, Tfunction_cases _) ->
+      List.filter_map (fun fp ->
+        match get_param_type fp with
+        | Some ty when is_unit_type ty -> None
+        | _ -> Some (Ident.name fp.fp_param)
+      ) params
+  | _ -> []
+
+(** Track defmacro definitions for stub generation.
+    Maps macro name to its arity (number of parameters). *)
+let defmacro_definitions : (string, int) Hashtbl.t = Hashtbl.create 16
+
+let reset_defmacro_definitions () =
+  Hashtbl.clear defmacro_definitions
+
+let register_defmacro name arity =
+  Hashtbl.replace defmacro_definitions name arity
+
+let is_defmacro_binding name =
+  Hashtbl.mem defmacro_definitions name
+
+(** Collect macro definitions and register them.
+    Supports two forms:
+    1. let macro_foo x y = Macro.quote (...)  -- legacy prefix convention
+    2. let foo = Macro.defmacro (fun x y -> Macro.quote (...))  -- explicit defmacro
+*)
+let collect_macro_definitions (str : Typedtree.structure) =
+  List.iter (fun item ->
+    match item.Typedtree.str_desc with
+    | Tstr_value (_, bindings) ->
+        List.iter (fun vb ->
+          match vb.Typedtree.vb_pat.pat_desc with
+          | Tpat_var (id, _, _) ->
+              let name = Ident.name id in
+              (* Check for macro_ prefix convention *)
+              if is_macro_definition name then begin
+                let macro_name = macro_name_of_function name in
+                let param_names = extract_param_names_from_expr vb.Typedtree.vb_expr in
+                (* Convert the function body to BEAM IR - this should be the macro template *)
+                let _, body = extract_function vb.Typedtree.vb_expr in
+                let macro_def : Beam_ir.macro_def = {
+                  macro_name;
+                  macro_params = param_names;
+                  macro_body = body;
+                  macro_loc = Beam_ir.no_loc;
+                } in
+                Macro_expand.register_macro macro_def
+              end
+              (* Check for Macro.defmacro form *)
+              else begin
+                match extract_defmacro_lambda vb.Typedtree.vb_expr with
+                | Some lambda_expr ->
+                    let macro_name = name in
+                    let param_names = extract_param_names_from_expr lambda_expr in
+                    let _, body = extract_function lambda_expr in
+                    let macro_def : Beam_ir.macro_def = {
+                      macro_name;
+                      macro_params = param_names;
+                      macro_body = body;
+                      macro_loc = Beam_ir.no_loc;
+                    } in
+                    Macro_expand.register_macro macro_def;
+                    (* Register for stub generation *)
+                    register_defmacro name (List.length param_names)
+                | None -> ()
+              end
+          | _ -> ()
+        ) bindings
+    | _ -> ()
+  ) str.str_items
+
+(** Generate a stub function for a defmacro definition.
+    The stub simply returns its last argument (identity-like behavior). *)
+let generate_defmacro_stub (name : string) (arity : int) : Beam_ir.fun_def =
+  let params = List.init arity (fun i -> Printf.sprintf "X%d" i) in
+  let body =
+    if arity = 0 then Beam_ir.Expr_lit (Beam_ir.Lit_atom "ok")
+    else Beam_ir.Expr_var (Printf.sprintf "X%d" (arity - 1))
+  in
+  { name; arity; params; body; loc = Beam_ir.no_loc }
+
+(** Generate __struct__/0 function for Elixir struct compatibility.
+    Returns a map with __struct__ key and all fields set to nil. *)
+let generate_struct_0 ~module_name (info : record_info) : Beam_ir.fun_def =
+  let full_module_name = "Elixir." ^ String.capitalize_ascii module_name in
+  (* Build the map: #{ '__struct__' => 'Elixir.Module', field1 => nil, ... } *)
+  let struct_pair = (Expr_lit (Lit_atom "__struct__"), Expr_lit (Lit_atom full_module_name)) in
+  let field_pairs = List.map (fun field ->
+    (Expr_lit (Lit_atom field), Expr_lit (Lit_atom "nil"))
+  ) info.field_names in
+  let body = Expr_map (struct_pair :: field_pairs) in
+  { name = "__struct__"; arity = 0; params = []; body; loc = Beam_ir.no_loc }
+
+(** Generate __struct__/1 function for Elixir struct compatibility.
+    Merges the default struct with provided overrides.
+    Note: Elixir passes keyword lists (list of {atom, value} tuples) to __struct__/1,
+    so we need to convert it to a map first with maps:from_list/1. *)
+let generate_struct_1 ~module_name (_info : record_info) : Beam_ir.fun_def =
+  let full_module_name = "Elixir." ^ String.capitalize_ascii module_name in
+  (* Body: maps:merge(__struct__(), maps:from_list(Overrides)) *)
+  let struct_call = Expr_call {
+    module_ = Expr_lit (Lit_atom full_module_name);
+    func = Expr_lit (Lit_atom "__struct__");
+    args = [];
+  } in
+  let overrides_as_map = Expr_call {
+    module_ = Expr_lit (Lit_atom "maps");
+    func = Expr_lit (Lit_atom "from_list");
+    args = [Expr_var "Overrides"];
+  } in
+  let body = Expr_call {
+    module_ = Expr_lit (Lit_atom "maps");
+    func = Expr_lit (Lit_atom "merge");
+    args = [struct_call; overrides_as_map];
+  } in
+  { name = "__struct__"; arity = 1; params = ["Overrides"]; body; loc = Beam_ir.no_loc }
 
 (** Convert a complete typed structure to a BEAM module *)
 let convert_structure ~module_name (str : Typedtree.structure) : Beam_ir.module_def =
   reset_vars ();
   reset_externals ();
   reset_top_level_functions ();
-  (* First pass: collect all external declarations and top-level functions *)
+  reset_defmacro_definitions ();
+  reset_elixir_struct ();
+  Macro_expand.reset ();
+  (* Store module name for use in elixir_struct mode *)
+  current_module_name := module_name;
+  (* Check for [@@@elixir_struct] attribute *)
+  elixir_struct_mode := has_elixir_struct_attribute str;
+  (* First pass: collect all external declarations, top-level functions, and macro definitions *)
   collect_externals str;
   collect_top_level_functions str;
-  (* Second pass: convert structure items *)
+  collect_macro_definitions str;
+  (* Second pass: convert structure items (excluding macro definitions) *)
   let functions : Beam_ir.fun_def list = List.concat_map convert_structure_item str.str_items in
+  (* Filter out macro_ prefix definitions from the output - they don't become runtime functions *)
+  let functions = List.filter (fun (f : Beam_ir.fun_def) ->
+    not (is_macro_definition f.name)
+  ) functions in
+  (* Replace defmacro bindings with auto-generated stubs *)
+  let functions = List.filter_map (fun (f : Beam_ir.fun_def) ->
+    if is_defmacro_binding f.name then
+      match Hashtbl.find_opt defmacro_definitions f.name with
+      | Some arity -> Some (generate_defmacro_stub f.name arity)
+      | None -> Some f  (* shouldn't happen *)
+    else
+      Some f
+  ) functions in
+  (* Add __struct__/0 and __struct__/1 for elixir_struct modules *)
+  let functions =
+    if !elixir_struct_mode then
+      match !elixir_struct_record with
+      | Some info ->
+          let struct_0 = generate_struct_0 ~module_name info in
+          let struct_1 = generate_struct_1 ~module_name info in
+          struct_0 :: struct_1 :: functions
+      | None -> functions
+    else functions
+  in
   let exports = List.map (fun (f : Beam_ir.fun_def) -> (f.name, f.arity)) functions in
-  {
-    (* Use Merlot. prefix to prevent shadowing Erlang/OTP modules *)
-    name = prefixed_module_name module_name;
+  let module_def = {
+    Beam_ir.name = prefixed_module_name module_name;
     exports;
     attributes = [];
     functions;
-  }
+  } in
+  (* Third pass: expand macros *)
+  Macro_expand.expand_module module_def

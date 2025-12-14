@@ -4,3 +4,7 @@
  (deps
   (glob_files cases/*.ml)
   (glob_files expected/*.core)))
+
+(test
+ (name test_macro_expand)
+ (libraries merlot alcotest))

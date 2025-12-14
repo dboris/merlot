@@ -1,0 +1,21 @@
+module 'Merlot.Macro_inject' ['swap'/2,
+                       'test'/1]
+    attributes []
+
+'swap'/2 =
+    fun (Param, Param) ->
+      call 'erlang':'raise' ('error', {'failure', #{#<109>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<99>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<117>(8,1,'integer',['unsigned'|['big']]),
+#<98>(8,1,'integer',['unsigned'|['big']])}#}, [])
+'test'/1 =
+    fun (_) ->
+      let <X> = 1 in let <Y> = 2 in case X of 
+  <Tmp> when 'true' -> let <V_1__swap_0> = Y in Tmp end
+end

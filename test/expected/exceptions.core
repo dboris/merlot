@@ -1,0 +1,29 @@
+module 'Merlot.Exceptions' ['safe_div'/2,
+                       'test_failwith'/1]
+    attributes []
+
+'safe_div'/2 =
+    fun (A, B) ->
+      try
+  case call 'erlang':'=:=' (B, 0) of
+  <'true'> when 'true' -> call 'erlang':'raise' ('error', {'my_error', 42}, [])
+  <'false'> when 'true' -> call 'erlang':'div' (A, B)
+end
+of <Result> -> Result
+catch <Class_1, Reason_2, Stack_3> ->
+  case Reason_2 of 
+  <{'my_error', _}> when 'true' -> -1
+  <'not_found'> when 'true' -> -2 end
+'test_failwith'/1 =
+    fun (_) ->
+      try
+  call 'erlang':'raise' ('error', {'failure', #{#<101>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']])}#}, [])
+of <Result> -> Result
+catch <Class_4, Reason_5, Stack_6> ->
+  case Reason_5 of 
+  <{'failure', _}> when 'true' -> 0 end
+end

@@ -2,3 +2,10 @@
  (public_name merlot)
  (name main)
  (libraries merlot cmdliner compiler-libs.common))
+
+; Generate version_info.ml with build timestamp
+(rule
+ (target version_info.ml)
+ (action
+  (with-stdout-to %{target}
+   (bash "echo 'let version = \"0.1.0\"'; echo 'let build_time = \"'$(date -u '+%Y-%m-%d %H:%M:%S UTC')'\"'"))))

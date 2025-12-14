@@ -10,7 +10,7 @@ tags: ["ocaml" "erlang" "beam" "compiler"]
 homepage: "https://github.com/dboris/merlot"
 bug-reports: "https://github.com/dboris/merlot/issues"
 depends: [
-  "ocaml" {>= "5.2"}
+  "ocaml" {>= "5.4"}
   "dune" {>= "3.20"}
   "cmdliner" {>= "1.2"}
   "alcotest" {with-test}

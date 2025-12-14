@@ -2,8 +2,121 @@
  (name merlot_stdlib)
  (public_name merlot.stdlib)
  (modules process erlang lists timer io result actor supervisor
-          list option string enum map keyword merlot_stdlib)
+          list option string enum map keyword macro inspect merlot_stdlib)
  ; Only bytecode - this library is for compiling to BEAM, not running natively
  (modes byte)
  ; Allow partial match warnings for selective receive patterns
  (flags (:standard -w -8)))
+
+(documentation
+ (package merlot))
+
+; Build and install stdlib BEAM files for runtime
+; These are compiled from OCaml to Core Erlang to BEAM
+; Note: We use %{exe:../bin/main.exe} to reference the local build, not installed binary
+
+(rule
+ (targets Merlot.Actor.core)
+ (deps actor.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/actor.ml))))
+
+(rule
+ (targets Merlot.Enum.core)
+ (deps enum.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/enum.ml))))
+
+(rule
+ (targets Merlot.Inspect.core)
+ (deps inspect.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/inspect.ml))))
+
+(rule
+ (targets Merlot.Keyword.core)
+ (deps keyword.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/keyword.ml))))
+
+(rule
+ (targets Merlot.Map.core)
+ (deps map.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/map.ml))))
+
+(rule
+ (targets Merlot.Option.core)
+ (deps option.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/option.ml))))
+
+(rule
+ (targets Merlot.Process.core)
+ (deps process.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/process.ml))))
+
+(rule
+ (targets Merlot.Result.core)
+ (deps result.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/result.ml))))
+
+(rule
+ (targets Merlot.Supervisor.core)
+ (deps supervisor.ml (:merlot %{exe:../bin/main.exe}))
+ (action (chdir %{project_root} (run %{merlot} --emit-core stdlib/supervisor.ml))))
+
+; Compile Core Erlang to BEAM
+(rule
+ (targets Merlot.Actor.beam)
+ (deps Merlot.Actor.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Enum.beam)
+ (deps Merlot.Enum.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Inspect.beam)
+ (deps Merlot.Inspect.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Keyword.beam)
+ (deps Merlot.Keyword.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Map.beam)
+ (deps Merlot.Map.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Option.beam)
+ (deps Merlot.Option.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Process.beam)
+ (deps Merlot.Process.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Result.beam)
+ (deps Merlot.Result.core)
+ (action (run erlc +from_core %{deps})))
+
+(rule
+ (targets Merlot.Supervisor.beam)
+ (deps Merlot.Supervisor.core)
+ (action (run erlc +from_core %{deps})))
+
+; Install BEAM files to lib/merlot/beam
+(install
+ (section lib)
+ (package merlot)
+ (files
+  (Merlot.Actor.beam as beam/Merlot.Actor.beam)
+  (Merlot.Enum.beam as beam/Merlot.Enum.beam)
+  (Merlot.Inspect.beam as beam/Merlot.Inspect.beam)
+  (Merlot.Keyword.beam as beam/Merlot.Keyword.beam)
+  (Merlot.Map.beam as beam/Merlot.Map.beam)
+  (Merlot.Option.beam as beam/Merlot.Option.beam)
+  (Merlot.Process.beam as beam/Merlot.Process.beam)
+  (Merlot.Result.beam as beam/Merlot.Result.beam)
+  (Merlot.Supervisor.beam as beam/Merlot.Supervisor.beam)))

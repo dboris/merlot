@@ -1,18 +1,43 @@
 (** String - OCaml-compatible String module backed by Elixir
 
-    Provides OCaml's String API using Elixir's String module.
-    Both OCaml and Elixir treat strings as binary/byte sequences,
-    making this a natural fit.
+    Provides OCaml's String API using Elixir's String module,
+    plus comprehensive Unicode support that OCaml's stdlib lacks.
 
     Note: Requires Elixir runtime. Strings are UTF-8 binaries.
+
+    {b OCaml-compatible functions:}
+    - Basic: [length], [get], [sub], [concat], [compare], [equal]
+    - Case: [uppercase_ascii], [lowercase_ascii], [capitalize_ascii], [uncapitalize_ascii]
+    - Splitting: [split_on_char]
+    - Iteration: [iter], [map], [fold_left]
+
+    {b Unicode operations} (not available in OCaml's String):
+    - Graphemes: [graphemes], [next_grapheme], [next_grapheme_size], [length_graphemes]
+    - Codepoints: [codepoints], [next_codepoint]
+    - Normalization: [normalize], [normalize_form], [equivalent]
+    - Validation: [is_valid], [is_printable], [replace_invalid], [chunk]
+    - Slicing: [byte_slice] (respects codepoint boundaries)
+
+    {b Elixir-specific utilities:}
+    - Access: [first], [last], [split_at]
+    - Metrics: [jaro_distance], [bag_distance], [count]
+    - Replace: [replace_prefix], [replace_suffix], [replace_leading], [replace_trailing]
 
     Usage:
     {[
       open Merlot_stdlib
 
-      let greeting = String.concat " " ["Hello"; "World"]
-      let upper = String.uppercase_ascii "hello"
+      (* OCaml-style *)
       let parts = String.split_on_char ',' "a,b,c"
+
+      (* Unicode-aware iteration *)
+      let chars = String.graphemes "héllo 🌍"  (* 7 graphemes *)
+
+      (* Fuzzy matching *)
+      let similar = String.jaro_distance "hello" "hallo"  (* ~0.87 *)
+
+      (* Safe Unicode handling *)
+      let clean = String.replace_invalid broken_utf8 "?"
     ]}
 *)
 
@@ -36,6 +61,15 @@ let get s i =
 
 (** Create string of n copies of character. *)
 external make : int -> char -> string = "String" "duplicate"
+
+(** Repeat string n times. *)
+external duplicate : string -> int -> string = "String" "duplicate"
+
+(** Get the first grapheme. Returns None if empty. *)
+external first : string -> string option = "String" "first"
+
+(** Get the last grapheme. Returns None if empty. *)
+external last : string -> string option = "String" "last"
 
 (** {1 Concatenation} *)
 
@@ -120,6 +154,10 @@ external split : string -> string -> string list = "String" "split"
 let split_on_char c s =
   split s (make 1 c)
 
+(** Split string at position into a tuple of two strings.
+    [split_at "hello" 2] returns [("he", "llo")]. *)
+external split_at : string -> int -> string * string = "String" "split_at"
+
 (** {1 Trimming} *)
 
 (** Remove leading and trailing whitespace. *)
@@ -149,6 +187,18 @@ let replace_first s pattern replacement =
   (* TODO: Use String.replace with limit *)
   replace s pattern replacement
 
+(** Replace prefix if it matches. *)
+external replace_prefix : string -> string -> string -> string = "String" "replace_prefix"
+
+(** Replace suffix if it matches. *)
+external replace_suffix : string -> string -> string -> string = "String" "replace_suffix"
+
+(** Replace leading occurrences of pattern. *)
+external replace_leading : string -> string -> string -> string = "String" "replace_leading"
+
+(** Replace trailing occurrences of pattern. *)
+external replace_trailing : string -> string -> string -> string = "String" "replace_trailing"
+
 (** {1 Predicates} *)
 
 (** Check if string is empty. *)
@@ -157,8 +207,14 @@ let is_empty s = length s = 0
 (** Check if string contains only whitespace. *)
 external is_blank : string -> bool = "String" "trim"
 
-(** Check if string matches pattern (simple glob). *)
+(** Check if string matches regex pattern. *)
 external matches : string -> string -> bool = "String" "match?"
+
+(** Check if string is valid UTF-8. *)
+external is_valid : string -> bool = "String" "valid?"
+
+(** Check if string contains only printable characters. *)
+external is_printable : string -> bool = "String" "printable?"
 
 (** {1 Conversion} *)
 
@@ -196,14 +252,77 @@ let fold_left f init s =
 
 (** {1 Unicode Operations} *)
 
-(** Split into list of graphemes (Unicode characters). *)
+(** Split into list of graphemes (Unicode characters).
+    A grapheme is what users perceive as a single character,
+    which may consist of multiple codepoints (e.g., "é" or emoji with modifiers). *)
 external graphemes : string -> string list = "String" "graphemes"
 
-(** Split into list of codepoints. *)
+(** Split into list of codepoints.
+    Each codepoint is returned as a single-codepoint string. *)
 external codepoints : string -> string list = "String" "codepoints"
 
-(** Reverse string (grapheme-aware). *)
+(** Get the next grapheme and the remainder of the string.
+    Returns [None] if string is empty.
+    Useful for streaming/parsing Unicode text character by character.
+    {[
+      let rec print_graphemes s =
+        match String.next_grapheme s with
+        | None -> ()
+        | Some (g, rest) ->
+            Io.format "Grapheme: ~s~n" [g];
+            print_graphemes rest
+    ]} *)
+external next_grapheme : string -> (string * string) option = "String" "next_grapheme"
+
+(** Get the next codepoint and the remainder of the string.
+    Returns [None] if string is empty. *)
+external next_codepoint : string -> (string * string) option = "String" "next_codepoint"
+
+(** Get the byte size of the next grapheme without extracting it.
+    Returns [None] if string is empty or invalid.
+    Useful for efficient scanning without allocation. *)
+external next_grapheme_size : string -> int option = "String" "next_grapheme_size"
+
+(** Slice string by byte positions, but return a valid UTF-8 string.
+    [byte_slice s start length] extracts bytes but ensures the result
+    doesn't split codepoints. *)
+external byte_slice : string -> int -> int -> string = "String" "byte_slice"
+
+(** Reverse string (grapheme-aware).
+    Correctly handles multi-codepoint graphemes like emoji. *)
 external reverse : string -> string = "String" "reverse"
 
-(** Normalize Unicode string. *)
+(** Normalize Unicode string to NFC form (canonical composition).
+    Use [normalize_form] for other normalization forms. *)
 external normalize : string -> string = "String" "normalize"
+
+(** Normalize Unicode string to specified form.
+    Forms: ["nfc"], ["nfd"], ["nfkc"], ["nfkd"]. *)
+external normalize_form : string -> string -> string = "String" "normalize"
+
+(** Check if two strings are canonically equivalent.
+    Two strings are equivalent if they normalize to the same form. *)
+external equivalent : string -> string -> bool = "String" "equivalent?"
+
+(** Replace invalid UTF-8 bytes with a replacement string.
+    [replace_invalid s replacement] returns a valid UTF-8 string.
+    Default replacement is the Unicode replacement character (U+FFFD). *)
+external replace_invalid : string -> string -> string = "String" "replace_invalid"
+
+(** Chunk string into segments based on a trait.
+    [chunk s "valid"] splits into valid/invalid UTF-8 segments.
+    [chunk s "printable"] splits into printable/non-printable segments. *)
+external chunk : string -> string -> string list = "String" "chunk"
+
+(** {1 String Metrics} *)
+
+(** Compute Jaro distance between two strings (0.0 to 1.0).
+    Useful for fuzzy string matching. *)
+external jaro_distance : string -> string -> float = "String" "jaro_distance"
+
+(** Compute bag distance between two strings.
+    An efficient approximation of string similarity. *)
+external bag_distance : string -> string -> int = "String" "bag_distance"
+
+(** Count occurrences of pattern in string. *)
+external count : string -> string -> int = "String" "count"

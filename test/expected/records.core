@@ -1,12 +1,31 @@
-module 'Merlot.Records' ['create_person'/2,
+module 'Merlot.Records' ['pp_person'/1,
+                       'create_person'/2,
                        'get_name'/1,
                        'get_age'/1,
                        'birthday'/1,
                        'rename'/2,
+                       'pp_address'/1,
+                       'pp_employee'/1,
                        'create_employee'/4,
                        'get_employee_name'/1]
     attributes []
 
+'pp_person'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<110>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<109>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (2, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (3, V)), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
 'create_person'/2 =
     fun (Name, Age) ->
       {'person', Name, Age}
@@ -22,6 +41,47 @@ module 'Merlot.Records' ['create_person'/2,
 'rename'/2 =
     fun (P, New_name) ->
       {'person', New_name, call 'erlang':'element' (3, P)}
+'pp_address'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<115>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (2, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<99>(8,1,'integer',['unsigned'|['big']]),
+#<105>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<121>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (3, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
+'pp_employee'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<112>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<110>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, apply 'pp_person'/1 (call 'erlang':'element' (2, V)), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<100>(8,1,'integer',['unsigned'|['big']]),
+#<100>(8,1,'integer',['unsigned'|['big']]),
+#<114>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, apply 'pp_address'/1 (call 'erlang':'element' (3, V)), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
 'create_employee'/4 =
     fun (Name, Age, Street, City) ->
       {'employee', {'person', Name, Age}, {'address', Street, City}}

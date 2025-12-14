@@ -55,3 +55,10 @@ module Core_erlang = Core_erlang
     - Markdown documentation files
     - EEP-48 compatible documentation chunks for BEAM tooling *)
 module Doc_extract = Doc_extract
+
+(** Macro expansion.
+
+    Handles compile-time macro expansion for the BEAM IR. Macros transform
+    AST fragments using quote/unquote/splice, similar to Elixir's macro system.
+    Includes hygiene support to prevent variable capture. *)
+module Macro_expand = Macro_expand

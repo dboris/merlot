@@ -18,7 +18,7 @@
  (synopsis "OCaml to BEAM/Erlang compiler")
  (description "Merlot compiles OCaml to Core Erlang, targeting the BEAM virtual machine")
  (depends
-  (ocaml (>= 5.2))
+  (ocaml (>= 5.4))
   dune
   (cmdliner (>= 1.2))
   (alcotest :with-test))

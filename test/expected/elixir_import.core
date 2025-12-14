@@ -1,0 +1,94 @@
+module 'Merlot.Elixir_import' ['pp_user'/1,
+                       'pp_response'/1,
+                       'pp_point'/1,
+                       'get_user_name'/1,
+                       'get_user_age'/1,
+                       'get_response_status'/1,
+                       'get_point_x'/1,
+                       'make_user'/3,
+                       'make_point'/2,
+                       'update_user_age'/2]
+    attributes []
+
+'pp_user'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<110>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<109>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (2, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<109>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<105>(8,1,'integer',['unsigned'|['big']]),
+#<108>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (3, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<103>(8,1,'integer',['unsigned'|['big']]),
+#<101>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (4, V)), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])])
+'pp_response'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<115>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<97>(8,1,'integer',['unsigned'|['big']]),
+#<116>(8,1,'integer',['unsigned'|['big']]),
+#<117>(8,1,'integer',['unsigned'|['big']]),
+#<115>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (2, V)), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<98>(8,1,'integer',['unsigned'|['big']]),
+#<111>(8,1,'integer',['unsigned'|['big']]),
+#<100>(8,1,'integer',['unsigned'|['big']]),
+#<121>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<34>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'element' (3, V), #{#<34>(8,1,'integer',['unsigned'|['big']])}#]), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
+'pp_point'/1 =
+    fun (V) ->
+      call 'erlang':'iolist_to_binary' ([#{#<123>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'iolist_to_binary' ([#{#<120>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (2, V)), call 'erlang':'iolist_to_binary' ([#{#<59>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<121>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']]),
+#<61>(8,1,'integer',['unsigned'|['big']]),
+#<32>(8,1,'integer',['unsigned'|['big']])}#, call 'erlang':'integer_to_binary' (call 'erlang':'element' (3, V)), #{#<125>(8,1,'integer',['unsigned'|['big']])}#])])])
+'get_user_name'/1 =
+    fun (Param_1) ->
+      case Param_1 of 
+  <U = _> when 'true' -> call 'maps':'get' ('name', U) end
+'get_user_age'/1 =
+    fun (Param_2) ->
+      case Param_2 of 
+  <U = _> when 'true' -> call 'maps':'get' ('age', U) end
+'get_response_status'/1 =
+    fun (Param_3) ->
+      case Param_3 of 
+  <R = _> when 'true' -> call 'maps':'get' ('status', R) end
+'get_point_x'/1 =
+    fun (Param_4) ->
+      case Param_4 of 
+  <P = _> when 'true' -> call 'erlang':'element' (2, P) end
+'make_user'/3 =
+    fun (Name, Email, Age) ->
+      ~{'name' => Name, 'email' => Email, 'age' => Age}~
+'make_point'/2 =
+    fun (X, Y) ->
+      {'point', X, Y}
+'update_user_age'/2 =
+    fun (Param_5, New_age) ->
+      case Param_5 of 
+  <U = _> when 'true' -> ~{'name' => call 'maps':'get' ('name', U), 'email' => call 'maps':'get' ('email', U), 'age' => New_age}~ end
+end

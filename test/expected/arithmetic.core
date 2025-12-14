@@ -16,7 +16,7 @@ module 'Merlot.Arithmetic' ['add'/2,
       call 'erlang':'*' (X, Y)
 'div'/2 =
     fun (X, Y) ->
-      call 'erlang':'/' (X, Y)
+      call 'erlang':'div' (X, Y)
 'neg'/1 =
     fun (X) ->
       call 'erlang':'-' (X)

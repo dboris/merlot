@@ -55,6 +55,9 @@ let rec pp_pattern fmt pat =
       Format.fprintf fmt "_"
   | Pat_alias (pat, var) ->
       Format.fprintf fmt "%s = %a" var pp_pattern pat
+  | Pat_inject var ->
+      (* Unhygienic binding - printed same as Pat_var in Core Erlang *)
+      Format.fprintf fmt "%s" var
 
 (** Print an expression *)
 let rec pp_expr fmt expr =
@@ -122,6 +125,18 @@ let rec pp_expr fmt expr =
       Format.fprintf fmt "do %a@,%a"
         pp_expr e1
         pp_expr e2
+  | Expr_map pairs ->
+      (* Core Erlang map syntax: ~{ K1 => V1, K2 => V2 }~ *)
+      let pp_pair fmt (k, v) =
+        Format.fprintf fmt "%a => %a" pp_expr k pp_expr v
+      in
+      Format.fprintf fmt "~{%a}~" (pp_list ", " pp_pair) pairs
+  | Expr_map_update { map; updates } ->
+      (* Core Erlang map update: ~{ M | K1 => V1, K2 => V2 }~ *)
+      let pp_pair fmt (k, v) =
+        Format.fprintf fmt "%a => %a" pp_expr k pp_expr v
+      in
+      Format.fprintf fmt "~{%a | %a}~" pp_expr map (pp_list ", " pp_pair) updates
   | Expr_try { body; catch_var = (cls, rsn, stk); catch_body } ->
       Format.fprintf fmt "try@,  %a@,of <Result> -> Result@,catch <%s, %s, %s> ->@,  %a"
         pp_expr body
@@ -146,6 +161,9 @@ let rec pp_expr fmt expr =
       Format.fprintf fmt "primop '%s' (%a)"
         name
         (pp_list ", " pp_expr) args
+  (* Macro constructs should be expanded before code generation *)
+  | Expr_quote _ | Expr_unquote _ | Expr_splice _ | Expr_stringify _ ->
+      failwith "Macro constructs must be expanded before Core Erlang generation"
 
 (** Print a binary operator as Core Erlang call *)
 and pp_binop_call fmt op a b =
@@ -154,6 +172,7 @@ and pp_binop_call fmt op a b =
     | Op_sub -> "erlang", "-"
     | Op_mul -> "erlang", "*"
     | Op_div -> "erlang", "/"
+    | Op_idiv -> "erlang", "div"
     | Op_mod -> "erlang", "rem"
     | Op_eq -> "erlang", "=:="
     | Op_ne -> "erlang", "=/="
